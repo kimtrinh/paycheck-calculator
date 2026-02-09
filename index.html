@@ -1,0 +1,2086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ePTR Paycheck Calculator</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  .drop-zone { border: 2px dashed #cbd5e1; transition: all 0.2s; }
+  .drop-zone.dragover { border-color: #3b82f6; background: #eff6ff; }
+  .tab-btn.active { background: #1e40af; color: white; }
+  .fade-in { animation: fadeIn 0.3s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  input[type="number"] { -moz-appearance: textfield; }
+  input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+<div class="max-w-4xl mx-auto px-4 py-8">
+
+  <!-- Header -->
+  <div class="text-center mb-8">
+    <h1 class="text-3xl font-bold text-gray-900">ePTR Paycheck Calculator</h1>
+    <p class="text-gray-500 mt-1">Upload your Kaiser ePTR .xls file to auto-calculate your paycheck</p>
+  </div>
+
+  <!-- Salary, Schedule Type & Expected Shifts -->
+  <div class="bg-white rounded-xl shadow-sm border p-4 mb-6 flex flex-wrap gap-4 items-end">
+    <div class="flex-1 min-w-[200px]">
+      <label class="block text-sm font-medium text-gray-700 mb-1">Monthly Salary</label>
+      <div class="relative">
+        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+        <input id="salaryInput" type="number" step="100" min="0" placeholder="e.g. 31400"
+               class="w-full pl-7 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg"
+               oninput="saveSalary(); recalcIfReady()">
+      </div>
+    </div>
+    <div class="flex-1 min-w-[140px]">
+      <label class="block text-sm font-medium text-gray-700 mb-1">Schedule Type</label>
+      <select id="scheduleTypeInput"
+              class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 text-lg bg-white"
+              onchange="saveScheduleType(); runAuditIfReady()">
+        <option value="10/10">10/10</option>
+        <option value="8/10">8/10</option>
+        <option value="5/10">5/10</option>
+        <option value="perDiem">Per Diem</option>
+      </select>
+      <p class="text-xs text-gray-400 mt-0.5" id="scheduleMinLabel">Min 16 W's/pay period</p>
+    </div>
+    <div class="flex-1 min-w-[160px] hidden" id="perDiemFahWrap">
+      <label class="block text-sm font-medium text-gray-700 mb-1">FAH (Hours)</label>
+      <input id="fahInput" type="number" min="0" step="0.1" placeholder="e.g. 160"
+             class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 text-lg text-center"
+             oninput="saveFah(); runAuditIfReady()">
+      <p class="text-xs text-gray-400 mt-0.5">Final Average Hours (pre-retirement)</p>
+    </div>
+    <div class="flex-1 min-w-[140px]">
+      <label class="block text-sm font-medium text-gray-700 mb-1">Expected Shifts</label>
+      <input id="expectedShiftsInput" type="number" min="0" max="30" step="1" placeholder="e.g. 13"
+             class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 text-lg text-center"
+             oninput="saveExpectedShifts(); runAuditIfReady()">
+      <p class="text-xs text-gray-400 mt-0.5">How many clinical shifts you actually worked</p>
+    </div>
+    <div class="flex-1 min-w-[200px]">
+      <label class="block text-sm font-medium text-gray-700 mb-1">Pay Period</label>
+      <div id="ppRange" class="px-3 py-2 text-lg text-gray-500">Upload ePTR to auto-detect</div>
+    </div>
+  </div>
+
+  <!-- Input Section -->
+  <div class="bg-white rounded-xl shadow-sm border mb-6 overflow-hidden">
+    <div class="flex border-b">
+      <button class="tab-btn active flex-1 py-3 text-sm font-medium text-center transition-colors" onclick="switchTab('upload')">Upload .xls File</button>
+      <button class="tab-btn flex-1 py-3 text-sm font-medium text-center text-gray-500 hover:text-gray-700 transition-colors" onclick="switchTab('manual')">Enter Hours Manually</button>
+    </div>
+
+    <!-- Upload Tab -->
+    <div id="tab-upload" class="p-6">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- ePTR Upload -->
+        <div id="dropZone" class="drop-zone rounded-xl p-8 text-center cursor-pointer"
+             onclick="document.getElementById('fileInput').click()"
+             ondragover="event.preventDefault(); this.classList.add('dragover')"
+             ondragleave="this.classList.remove('dragover')"
+             ondrop="event.preventDefault(); this.classList.remove('dragover'); handleFileDrop(event)">
+          <div class="text-4xl mb-2">📊</div>
+          <p class="text-base font-medium text-gray-700">ePTR .xls File</p>
+          <p class="text-xs text-gray-400 mt-1">Drop or click to upload</p>
+          <p class="text-xs text-gray-300 mt-2">From Kaiser Oracle Analytics</p>
+          <input id="fileInput" type="file" accept=".xls,.xlsx,.html,.htm" class="hidden" onchange="handleFileSelect(event)">
+        </div>
+        <!-- QGenda/iCal Schedule -->
+        <div class="drop-zone rounded-xl p-6 text-center"
+             ondragover="event.preventDefault(); this.classList.add('dragover')"
+             ondragleave="this.classList.remove('dragover')"
+             ondrop="event.preventDefault(); this.classList.remove('dragover'); handleIcalDrop(event)">
+          <div class="text-3xl mb-1">📅</div>
+          <p class="text-base font-medium text-gray-700 mb-3">QGenda Schedule <span class="text-xs font-normal text-gray-400">(optional)</span></p>
+
+          <!-- URL input -->
+          <div class="flex gap-2 mb-2">
+            <input id="icalUrlInput" type="url" placeholder="Paste iCal URL here"
+                   class="flex-1 px-3 py-1.5 border rounded-lg text-xs focus:ring-2 focus:ring-blue-500"
+                   oninput="saveIcalUrl()">
+            <button onclick="fetchIcalFromUrl()" id="fetchIcalBtn"
+                    class="px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 whitespace-nowrap">
+              Load
+            </button>
+          </div>
+
+          <!-- Or upload file -->
+          <div class="flex items-center gap-2 text-xs text-gray-400 mb-2">
+            <div class="flex-1 border-t"></div><span>or</span><div class="flex-1 border-t"></div>
+          </div>
+          <button onclick="document.getElementById('icalFileInput').click()"
+                  class="px-4 py-1.5 border border-gray-300 rounded-lg text-xs text-gray-600 hover:bg-gray-50">
+            Upload .ics file
+          </button>
+          <input id="icalFileInput" type="file" accept=".ics,.ical" class="hidden" onchange="handleIcalSelect(event)">
+
+          <p class="text-xs text-gray-300 mt-2">Auto-checks for missing shifts</p>
+        </div>
+      </div>
+      <div id="statusArea" class="hidden mt-4 p-3 rounded-lg text-sm"></div>
+      <div id="icalStatusArea" class="hidden mt-2 p-3 rounded-lg text-sm"></div>
+      <!-- ICS Averaging Cycle Analysis -->
+      <div id="icsCycleSection" class="hidden mt-4 border-t pt-4">
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-base font-semibold text-gray-900">Schedule Hour Analysis</span>
+          <span id="icsCycleBadge" class="text-xs font-medium px-2 py-0.5 rounded-full"></span>
+        </div>
+        <div id="icsCycleCards" class="space-y-3"></div>
+      </div>
+    </div>
+
+    <!-- Manual Tab -->
+    <div id="tab-manual" class="p-6 hidden">
+      <p class="text-sm text-gray-500 mb-4">Enter your total hours from your ePTR summary. The TRC W's × 4 = hours.</p>
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-4" id="manualGrid"></div>
+      <button onclick="processManual()" class="mt-4 w-full px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Calculate Pay</button>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div id="errorArea" class="hidden mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-800"></div>
+
+  <!-- Shifts Worked -->
+  <div id="shiftsWorkedSection" class="hidden bg-white rounded-xl shadow-sm border mb-6 fade-in">
+    <div class="px-6 py-4 border-b flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <span class="text-lg font-semibold text-gray-900">Shifts Worked</span>
+        <span id="shiftsWorkedCount" class="bg-blue-100 text-blue-700 text-xs font-medium px-2 py-0.5 rounded-full"></span>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-2 text-left font-medium text-gray-600">Date</th>
+            <th class="px-4 py-2 text-left font-medium text-gray-600">Shift</th>
+            <th class="px-4 py-2 text-left font-medium text-gray-600">Time</th>
+            <th class="px-4 py-2 text-right font-medium text-gray-600">Total</th>
+            <th class="px-4 py-2 text-left font-medium text-gray-600">Breakdown</th>
+          </tr>
+        </thead>
+        <tbody id="shiftsWorkedBody"></tbody>
+      </table>
+    </div>
+    <div id="shiftsWorkedFootnote" class="hidden px-4 py-2 text-xs text-gray-400 border-t">
+      * Partial shift — started in previous pay period; only hours in this period shown
+    </div>
+  </div>
+
+  <!-- Paycheck Issues (Audit) -->
+  <div id="issuesSection" class="hidden mb-6 fade-in">
+    <div id="issuesBox" class="rounded-xl border p-5">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2">
+          <span id="issuesIcon" class="text-2xl"></span>
+          <h2 id="issuesTitle" class="text-lg font-bold"></h2>
+          <span id="issuesCount" class="text-xs font-medium px-2 py-0.5 rounded-full"></span>
+        </div>
+        <button id="copyIssuesBtn" onclick="copyIssuesToClipboard()" class="hidden px-3 py-1.5 text-xs font-medium bg-white border rounded-lg hover:bg-gray-50 transition-colors">
+          Copy for Clerk
+        </button>
+      </div>
+      <div id="issuesList" class="space-y-2 text-sm"></div>
+    </div>
+  </div>
+
+  <!-- Hour Requirements / Averaging Cycle -->
+  <div id="hourReqSection" class="hidden bg-white rounded-xl shadow-sm border mb-6 fade-in">
+    <div class="px-6 py-4 border-b">
+      <div class="flex items-center gap-2">
+        <span class="text-lg font-semibold text-gray-900">Hour Requirements</span>
+        <span id="hourReqBadge" class="text-xs font-medium px-2 py-0.5 rounded-full"></span>
+      </div>
+      <p id="hourReqSubtitle" class="text-xs text-gray-400 mt-0.5"></p>
+    </div>
+    <div class="p-6 space-y-4">
+      <!-- Pay Period Minimum -->
+      <div id="ppMinSection">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-sm font-medium text-gray-700">Pay Period Minimum</span>
+          <span id="ppMinStatus" class="text-sm font-semibold"></span>
+        </div>
+        <div class="w-full bg-gray-200 rounded-full h-3">
+          <div id="ppMinBar" class="h-3 rounded-full transition-all duration-500" style="width: 0%"></div>
+        </div>
+        <p id="ppMinDetail" class="text-xs text-gray-500 mt-1"></p>
+      </div>
+      <!-- Averaging Cycle -->
+      <div id="avgCycleSection">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-sm font-medium text-gray-700">Averaging Cycle</span>
+          <span id="avgCycleStatus" class="text-sm font-semibold"></span>
+        </div>
+        <div class="w-full bg-gray-200 rounded-full h-3">
+          <div id="avgCycleBar" class="h-3 rounded-full transition-all duration-500" style="width: 0%"></div>
+        </div>
+        <p id="avgCycleDates" class="text-xs text-gray-500 mt-1"></p>
+        <p id="avgCycleDetail" class="text-xs text-gray-500 mt-0.5"></p>
+      </div>
+      <!-- Averaging Cycle Pay Period Breakdown -->
+      <div id="avgCycleBreakdown" class="hidden">
+        <p class="text-xs font-medium text-gray-600 mb-2">Pay Periods in This Cycle</p>
+        <div id="avgCyclePPList" class="space-y-1"></div>
+      </div>
+      <!-- Future Cycles -->
+      <div id="futureCyclesSection" class="hidden border-t pt-3 mt-3">
+        <button onclick="toggleSection('futureCyclesBody')" class="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800">
+          <span id="futureCyclesToggle">▸</span> View Future Averaging Cycles
+        </button>
+        <div id="futureCyclesBody" class="hidden mt-2">
+          <div id="futureCyclesList" class="space-y-1 text-xs text-gray-600"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Parsed Shifts (collapsible) -->
+  <div id="shiftsSection" class="hidden bg-white rounded-xl shadow-sm border mb-6 fade-in">
+    <button onclick="toggleSection('shiftsBody')" class="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50">
+      <div class="flex items-center gap-2">
+        <span class="text-lg font-semibold text-gray-900">Shift Detail</span>
+        <span id="shiftCount" class="bg-blue-100 text-blue-700 text-xs font-medium px-2 py-0.5 rounded-full"></span>
+      </div>
+      <span id="shiftsToggle" class="text-gray-400 text-xl">▾</span>
+    </button>
+    <div id="shiftsBody" class="border-t">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-4 py-2 text-left font-medium text-gray-600">Date</th>
+              <th class="px-4 py-2 text-left font-medium text-gray-600">Shift</th>
+              <th class="px-4 py-2 text-left font-medium text-gray-600">Session</th>
+              <th class="px-4 py-2 text-right font-medium text-gray-600">Hours</th>
+              <th class="px-4 py-2 text-left font-medium text-gray-600">TRC</th>
+              <th class="px-4 py-2 text-left font-medium text-gray-600">Pay Category</th>
+            </tr>
+          </thead>
+          <tbody id="shiftsTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div id="resultsSection" class="hidden bg-white rounded-xl shadow-sm border mb-6 fade-in">
+    <div class="px-6 py-4 border-b">
+      <h2 class="text-lg font-semibold text-gray-900">Pay Breakdown</h2>
+      <p id="resultsSubtitle" class="text-xs text-gray-400 mt-0.5"></p>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-6 py-3 text-left font-medium text-gray-600">Category</th>
+            <th class="px-6 py-3 text-right font-medium text-gray-600">Hours</th>
+            <th class="px-6 py-3 text-right font-medium text-gray-600">W's</th>
+            <th class="px-6 py-3 text-right font-medium text-gray-600">Rate/hr</th>
+            <th class="px-6 py-3 text-right font-medium text-gray-600">Mult</th>
+            <th class="px-6 py-3 text-right font-medium text-gray-600">Total Pay</th>
+          </tr>
+        </thead>
+        <tbody id="resultsTableBody"></tbody>
+        <tfoot>
+          <tr class="bg-blue-50 font-bold">
+            <td class="px-6 py-3">TOTAL</td>
+            <td id="totalHours" class="px-6 py-3 text-right"></td>
+            <td id="totalWs" class="px-6 py-3 text-right"></td>
+            <td class="px-6 py-3"></td>
+            <td class="px-6 py-3"></td>
+            <td id="totalPay" class="px-6 py-3 text-right text-lg"></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <!-- Cross-check -->
+    <div id="crossCheckArea" class="hidden px-6 py-3 border-t bg-green-50">
+      <p id="crossCheckText" class="text-sm text-green-800 font-medium"></p>
+    </div>
+    <!-- Verification -->
+    <div class="px-6 py-4 border-t bg-gray-50">
+      <div class="flex flex-wrap gap-4 items-end">
+        <div class="flex-1 min-w-[200px]">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Actual Paycheck Gross</label>
+          <div class="relative">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+            <input id="actualPayInput" type="number" step="0.01" min="0" placeholder="Enter actual gross pay"
+                   class="w-full pl-7 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" oninput="updateDifference()">
+          </div>
+        </div>
+        <div id="differenceArea" class="flex-1 min-w-[200px] hidden">
+          <div id="differenceDisplay" class="p-3 rounded-lg text-center font-medium"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Warnings -->
+  <div id="warningsSection" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 fade-in">
+    <h3 class="font-medium text-amber-800 mb-2">Warnings</h3>
+    <ul id="warningsList" class="text-sm text-amber-700 space-y-1"></ul>
+  </div>
+
+  <!-- Footer -->
+  <div class="text-center text-xs text-gray-400 py-4">
+    ePTR Paycheck Calculator &middot; For Kaiser Permanente physicians &middot; Not affiliated with Kaiser Permanente
+  </div>
+</div>
+
+<script>
+// ===== CONFIGURATION =====
+// Pay rates verified against actual Kaiser paycheck
+// Base rate = (Monthly Salary × 12) / 2080, rounded to 3 decimal places (Kaiser standard)
+const CONFIG = {
+  hoursPerYear: 2080,
+  multipliers: { day: 1.0, evening: 1.2, weekend: 1.2, overnight: 1.5 },
+  // TRC code → pay category (from Kaiser ePTR)
+  trcMap: {
+    'WD': 'day', 'WEV': 'evening', 'WKN': 'weekend', 'WO': 'overnight',
+    'ET': 'education', 'H': 'holiday', 'VAC': 'vacation', 'SL': 'sick'
+  },
+  // Pay categories in display order
+  shiftCategories: ['day', 'evening', 'weekend', 'overnight'],
+  leaveCategories: [
+    { key: 'education', label: 'ED 1/2 (Education)', trc: 'ET' },
+    { key: 'holiday', label: 'Holiday Pay', trc: 'H' },
+    { key: 'edLeave', label: 'Ed Leave', trc: null },
+    { key: 'vacation', label: 'Vacation', trc: 'VAC' },
+    { key: 'sick', label: 'Sick Leave', trc: 'SL' },
+    { key: 'indirect', label: 'Indirect Work', trc: null }
+  ]
+};
+
+// ===== SHIFT DATABASE =====
+// Each shift: name, location (fmc/omc), startHour (24h), endHour (24h, may be >24 for overnight), totalHours
+const SHIFTS = [
+  // OMC (Ontario Medical Center)
+  { name: 'OMC - 5a-3p',        loc: 'omc', start: 5,  end: 15, hours: 10 },
+  { name: 'OMC - 6a-4p',        loc: 'omc', start: 6,  end: 16, hours: 10 },
+  { name: 'OMC - 7a-7p',        loc: 'omc', start: 7,  end: 19, hours: 12 },
+  { name: 'OMC - 8a-8p',        loc: 'omc', start: 8,  end: 20, hours: 12 },
+  { name: 'OMC - 10a-10p',      loc: 'omc', start: 10, end: 22, hours: 12 },
+  { name: 'OMC - 12p-12a',      loc: 'omc', start: 12, end: 24, hours: 12 },
+  { name: 'OMC - 3p-1a',        loc: 'omc', start: 15, end: 25, hours: 10 },
+  { name: 'OMC - 4p-2a',        loc: 'omc', start: 16, end: 26, hours: 10 },
+  { name: 'OMC - 7p-7a',        loc: 'omc', start: 19, end: 31, hours: 12 },
+  { name: 'OMC - (1) 8p-8a',    loc: 'omc', start: 20, end: 32, hours: 12 },
+  { name: 'OMC - (2) 8p-8a',    loc: 'omc', start: 20, end: 32, hours: 12 },
+  { name: 'OMC - 10p-8a',       loc: 'omc', start: 22, end: 32, hours: 10 },
+  { name: 'OMC - PITT 7a-7p',   loc: 'omc', start: 7,  end: 19, hours: 12 },
+  { name: 'OMC - PITT 7p-7a',   loc: 'omc', start: 19, end: 31, hours: 12 },
+  { name: 'OMC FLEX 9a-9p',     loc: 'omc', start: 9,  end: 21, hours: 12 },
+  { name: 'OMC - FLEX 2p-2a',   loc: 'omc', start: 14, end: 26, hours: 12 },
+  { name: 'OMC - FLEX 3p-3a',   loc: 'omc', start: 15, end: 27, hours: 12 },
+  // FMC (Fontana Medical Center)
+  { name: 'FMC - 7a-7p',           loc: 'fmc', start: 7,  end: 19, hours: 12 },
+  { name: 'FMC - 7p-7a',           loc: 'fmc', start: 19, end: 31, hours: 12 },
+  { name: 'FMC - Red (1) 5a-3p',   loc: 'fmc', start: 5,  end: 15, hours: 10 },
+  { name: 'FMC - Blue (2) 5a-3p',  loc: 'fmc', start: 5,  end: 15, hours: 10 },
+  { name: 'FMC - Red (1) 6a-4p',   loc: 'fmc', start: 6,  end: 16, hours: 10 },
+  { name: 'FMC - Blue (2) 6a-4p',  loc: 'fmc', start: 6,  end: 16, hours: 10 },
+  { name: 'FMC - Red 10a-10p',     loc: 'fmc', start: 10, end: 22, hours: 12 },
+  { name: 'FMC - Red 12p-10p',     loc: 'fmc', start: 12, end: 22, hours: 10 },
+  { name: 'FMC - Blue 1p-11p',     loc: 'fmc', start: 13, end: 23, hours: 10 },
+  { name: 'FMC - Red 2p-12a',      loc: 'fmc', start: 14, end: 24, hours: 10 },
+  { name: 'FMC - Blue 3p-1a',      loc: 'fmc', start: 15, end: 25, hours: 10 },
+  { name: 'FMC - Red (1) 8p-8a',   loc: 'fmc', start: 20, end: 32, hours: 12 },
+  { name: 'FMC - Blue (2) 8p-8a',  loc: 'fmc', start: 20, end: 32, hours: 12 },
+  { name: 'FMC - Blue 9p-7a',      loc: 'fmc', start: 21, end: 31, hours: 10 },
+  { name: 'FMC - Blue 10p-8a',     loc: 'fmc', start: 22, end: 32, hours: 10 },
+  { name: 'FMC - PEDS 3p-1a',      loc: 'fmc', start: 15, end: 25, hours: 10 },
+  { name: 'FMC - Peds 2 11a-11p',  loc: 'fmc', start: 11, end: 23, hours: 12 },
+  { name: 'FMC - PITT 7a-7p',      loc: 'fmc', start: 7,  end: 19, hours: 12 },
+  { name: 'FMC - PITT 10a-10p',    loc: 'fmc', start: 10, end: 22, hours: 12 },
+  { name: 'FMC - PITT 7p-7a',      loc: 'fmc', start: 19, end: 31, hours: 12 },
+  { name: 'FMC - FLEX 5a-5p',      loc: 'fmc', start: 5,  end: 17, hours: 12 },
+  { name: 'FMC - FLEX 8a-8p',      loc: 'fmc', start: 8,  end: 20, hours: 12 },
+  { name: 'FMC - FLEX 12p-12a',    loc: 'fmc', start: 12, end: 24, hours: 12 },
+  { name: 'FMC - FLEX 3p-3a',      loc: 'fmc', start: 15, end: 27, hours: 12 },
+  { name: 'FMC - FLEX 6p-6a',      loc: 'fmc', start: 18, end: 30, hours: 12 },
+];
+
+// ===== STATE =====
+let shifts = [];
+let groupedShifts = []; // grouped into actual shifts worked
+let hours = { day: 0, evening: 0, weekend: 0, overnight: 0 };
+let leaveHours = {};
+let summaryWs = null;
+let scheduledShifts = []; // from QGenda iCal
+let payPeriodStart = null; // detected from ePTR
+let payPeriodEnd = null;
+CONFIG.leaveCategories.forEach(l => leaveHours[l.key] = 0);
+
+// ===== HELPERS =====
+const $ = id => document.getElementById(id);
+const fmt = n => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function getCategoryLabel(cat) {
+  return { day: 'Work Day', evening: 'Work Eve', weekend: 'Work Wknd', overnight: 'Work ON' }[cat] || cat;
+}
+
+function getCategoryColor(cat) {
+  return {
+    day: 'text-emerald-700', evening: 'text-purple-700',
+    weekend: 'text-orange-700', overnight: 'text-indigo-700',
+    education: 'text-sky-700', holiday: 'text-rose-700'
+  }[cat] || 'text-gray-700';
+}
+
+const RULE_LEAVE_KEYS = ['education', 'vacation', 'sick', 'edLeave'];
+function getRuleLeaveHours() {
+  return RULE_LEAVE_KEYS.reduce((sum, k) => sum + (leaveHours[k] || 0), 0);
+}
+
+// ===== TAB SWITCHING =====
+function switchTab(tab) {
+  ['upload','manual'].forEach(t => $('tab-'+t).classList.toggle('hidden', t !== tab));
+  document.querySelectorAll('.tab-btn').forEach((btn,i) => {
+    const tabs = ['upload','manual'];
+    btn.classList.toggle('active', tabs[i] === tab);
+    if (tabs[i] !== tab) { btn.classList.remove('bg-blue-800'); btn.classList.add('text-gray-500'); }
+  });
+  if (tab === 'manual') initManualGrid();
+}
+
+function toggleSection(id) {
+  const el = $(id);
+  el.classList.toggle('hidden');
+  const toggle = $(id.replace('Body','Toggle'));
+  if (toggle) toggle.textContent = el.classList.contains('hidden') ? '▸' : '▾';
+}
+
+// ===== SALARY PERSISTENCE =====
+function saveSalary() {
+  try { localStorage.setItem('eptr_salary', $('salaryInput').value); } catch(e) {}
+}
+function loadSalary() {
+  try {
+    const s = localStorage.getItem('eptr_salary');
+    if (s) $('salaryInput').value = s;
+  } catch(e) {}
+}
+
+// ===== FILE HANDLING =====
+function handleFileDrop(e) { if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); }
+function handleFileSelect(e) { if (e.target.files[0]) processFile(e.target.files[0]); }
+function handleIcalDrop(e) { if (e.dataTransfer.files[0]) processIcalFile(e.dataTransfer.files[0]); }
+function handleIcalSelect(e) { if (e.target.files[0]) processIcalFile(e.target.files[0]); }
+
+async function processFile(file) {
+  hideError();
+  showStatus('info', 'Reading file...');
+  try {
+    const text = await file.text();
+
+    // The .xls from Kaiser is actually an HTML email (MIME format from Oracle Analytics Publisher)
+    let html = text;
+
+    // If it's a MIME email, extract the HTML part
+    if (text.startsWith('Date:') || text.startsWith('MIME') || text.includes('Content-Type: multipart')) {
+      const htmlMatch = text.match(/<\?xml[\s\S]*?<\/html>/i) || text.match(/<html[\s\S]*?<\/html>/i);
+      if (htmlMatch) {
+        html = htmlMatch[0];
+      } else {
+        // Try to find HTML between MIME boundaries
+        const parts = text.split(/--[\w.]+/);
+        for (const part of parts) {
+          if (part.includes('<table') || part.includes('<html')) {
+            const tagStart = part.indexOf('<');
+            if (tagStart >= 0) { html = part.substring(tagStart); break; }
+          }
+        }
+      }
+    }
+
+    // Parse HTML table
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const tables = doc.querySelectorAll('table');
+
+    if (tables.length === 0) {
+      showError('No tables found in file. Please upload the .xls ePTR file from Kaiser.');
+      return;
+    }
+
+    // Find the shift detail table (has columns: Date, Start, End, Session, Hrs, TRC)
+    let shiftTable = null;
+    let summaryTable = null;
+
+    for (const table of tables) {
+      const headerRow = table.querySelector('tr');
+      if (!headerRow) continue;
+      const headers = Array.from(headerRow.querySelectorAll('td, th')).map(c => c.textContent.trim().toLowerCase());
+      if (headers.includes('trc') && headers.includes('hrs') && headers.includes('date')) {
+        shiftTable = table;
+      } else if (headers.includes('trc') && headers.includes('total') && !headers.includes('date')) {
+        summaryTable = table;
+      }
+    }
+
+    if (!shiftTable) {
+      showError('Could not find the shift detail table. Make sure this is the ePTR .xls export.');
+      return;
+    }
+
+    // Parse shift rows
+    const rows = Array.from(shiftTable.querySelectorAll('tr')).slice(1); // skip header
+    const headerRow = shiftTable.querySelector('tr');
+    const headers = Array.from(headerRow.querySelectorAll('td, th')).map(c => c.textContent.trim().toLowerCase());
+
+    // Find column indices
+    const col = {
+      date: headers.findIndex(h => h === 'date'),
+      shiftId: headers.findIndex(h => h.includes('shift id') || h.includes('md shift')),
+      type: headers.findIndex(h => h === 'type'),
+      start: headers.findIndex(h => h === 'start'),
+      end: headers.findIndex(h => h === 'end'),
+      session: headers.findIndex(h => h === 'session'),
+      hrs: headers.findIndex(h => h === 'hrs'),
+      trc: headers.findIndex(h => h === 'trc')
+    };
+
+    const parsed = [];
+    for (const row of rows) {
+      const cells = Array.from(row.querySelectorAll('td, th')).map(c => c.textContent.trim());
+      if (cells.length < 5) continue;
+
+      const dateStr = col.date >= 0 ? cells[col.date] : '';
+      const shiftId = col.shiftId >= 0 ? cells[col.shiftId] : '';
+      const type = col.type >= 0 ? cells[col.type] : '';
+      const startVal = col.start >= 0 ? parseInt(cells[col.start]) : NaN;
+      const endVal = col.end >= 0 ? parseInt(cells[col.end]) : NaN;
+      const session = col.session >= 0 ? cells[col.session] : '';
+      const hrs = col.hrs >= 0 ? parseFloat(cells[col.hrs]) : 0;
+      const trc = col.trc >= 0 ? cells[col.trc] : '';
+
+      if (!dateStr || isNaN(hrs) || hrs <= 0) continue;
+
+      // Parse TRC code (e.g., "1.5WO", ".5WD", "1WEV", "2H", "1ET")
+      const trcMatch = trc.match(/[\d.]*\s*(WD|WEV|WKN|WO|ET|H|VAC|SL)/i);
+      const trcCode = trcMatch ? trcMatch[1].toUpperCase() : '';
+      const payCat = CONFIG.trcMap[trcCode] || 'day';
+
+      parsed.push({
+        date: dateStr,
+        shiftId: shiftId,
+        type: type,
+        startVal: isNaN(startVal) ? undefined : startVal,
+        endVal: isNaN(endVal) ? undefined : endVal,
+        session: session,
+        hours: hrs,
+        trcRaw: trc,
+        trcCode: trcCode,
+        payCategory: payCat
+      });
+    }
+
+    // Parse summary table for cross-check
+    if (summaryTable) {
+      summaryWs = {};
+      const sRows = Array.from(summaryTable.querySelectorAll('tr')).slice(1);
+      const sHeaders = Array.from(summaryTable.querySelector('tr').querySelectorAll('td, th'))
+        .map(c => c.textContent.trim().toLowerCase());
+      const trcCol = sHeaders.findIndex(h => h === 'trc');
+      const totalCol = sHeaders.findIndex(h => h === 'total');
+      for (const sr of sRows) {
+        const sc = Array.from(sr.querySelectorAll('td, th')).map(c => c.textContent.trim());
+        if (trcCol >= 0 && totalCol >= 0 && sc[trcCol]) {
+          summaryWs[sc[trcCol].toUpperCase()] = parseFloat(sc[totalCol]) || 0;
+        }
+      }
+    }
+
+    if (parsed.length === 0) {
+      showError('No shift data found in the table. Check the file format.');
+      return;
+    }
+
+    showStatus('success', `Found ${parsed.length} shift entries`);
+    loadParsedShifts(parsed);
+
+  } catch (err) {
+    console.error(err);
+    showError('Error reading file: ' + err.message);
+  }
+}
+
+// ===== ICAL PROCESSING =====
+function saveIcalUrl() {
+  try { localStorage.setItem('eptr_ical_url', $('icalUrlInput').value); } catch(e) {}
+}
+function loadIcalUrl() {
+  try {
+    const url = localStorage.getItem('eptr_ical_url');
+    if (url) $('icalUrlInput').value = url;
+  } catch(e) {}
+}
+
+async function fetchIcalFromUrl() {
+  const url = $('icalUrlInput').value.trim();
+  if (!url) { showIcalStatus('error', 'Please paste your iCal URL first'); return; }
+
+  const btn = $('fetchIcalBtn');
+  btn.textContent = 'Loading...';
+  btn.disabled = true;
+  showIcalStatus('info', 'Fetching schedule...');
+
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const text = await resp.text();
+    processIcalText(text);
+  } catch (err) {
+    // CORS or network error — show helpful fallback
+    console.warn('iCal fetch failed (likely CORS):', err.message);
+    showIcalStatus('warn',
+      'Browser security blocked the direct fetch. Click below to download, then upload the file.');
+    // Show a download link
+    const el = $('icalStatusArea');
+    el.innerHTML = `
+      <span class="font-medium">⚠ Can't fetch directly</span> — browsers block cross-site requests for security.
+      <div class="mt-2 flex gap-2">
+        <a href="${url}" target="_blank" rel="noopener"
+           class="inline-block px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700">
+          Download .ics file
+        </a>
+        <span class="text-xs text-gray-500 self-center">then drop it here or click "Upload .ics file"</span>
+      </div>
+    `;
+    el.className = 'mt-2 p-3 rounded-lg text-sm bg-amber-50 text-amber-800';
+    el.classList.remove('hidden');
+  } finally {
+    btn.textContent = 'Load';
+    btn.disabled = false;
+  }
+}
+
+async function processIcalFile(file) {
+  try {
+    const text = await file.text();
+    processIcalText(text);
+  } catch (err) {
+    console.error(err);
+    showIcalStatus('error', 'Error reading .ics file: ' + err.message);
+  }
+}
+
+function processIcalText(text) {
+  const events = parseIcal(text);
+  if (events.length === 0) {
+    showIcalStatus('error', 'No events found in the calendar data');
+    return;
+  }
+  scheduledShifts = events;
+  showIcalStatus('success', `Loaded ${events.length} scheduled events from QGenda`);
+
+  // Run averaging cycle analysis using ICS data
+  checkAveragingCyclesFromIcs();
+
+  // If ePTR already loaded, re-run audit with schedule comparison
+  if (groupedShifts.length > 0) auditPaycheck();
+}
+
+function parseIcal(text) {
+  const events = [];
+  // Split into VEVENT blocks
+  const blocks = text.split('BEGIN:VEVENT');
+  for (let i = 1; i < blocks.length; i++) {
+    const block = blocks[i].split('END:VEVENT')[0];
+    const ev = {};
+
+    // Extract fields (handles folded lines — lines starting with space/tab are continuations)
+    const unfolded = block.replace(/\r?\n[ \t]/g, '');
+    const lines = unfolded.split(/\r?\n/);
+    for (const line of lines) {
+      const match = line.match(/^([^:;]+)(?:;[^:]*)?:(.*)/);
+      if (!match) continue;
+      const key = match[1].trim().toUpperCase();
+      const val = match[2].trim();
+      if (key === 'SUMMARY') ev.summary = val;
+      else if (key === 'DTSTART') ev.dtstart = parseIcalDate(val);
+      else if (key === 'DTEND') ev.dtend = parseIcalDate(val);
+      else if (key === 'LOCATION') ev.location = val;
+      else if (key === 'DESCRIPTION') ev.description = val;
+    }
+
+    if (ev.summary && ev.dtstart) {
+      // Calculate duration in hours
+      if (ev.dtend) {
+        ev.durationHours = (ev.dtend - ev.dtstart) / (1000 * 60 * 60);
+      }
+      events.push(ev);
+    }
+  }
+
+  // Sort by start date
+  events.sort((a, b) => a.dtstart - b.dtstart);
+  return events;
+}
+
+function parseIcalDate(str) {
+  // Handle formats: 20260118T190000Z, 20260118T190000, 20260118
+  const m = str.match(/(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2}))?/);
+  if (!m) return null;
+  const year = parseInt(m[1]);
+  const month = parseInt(m[2]) - 1;
+  const day = parseInt(m[3]);
+  const hour = m[4] ? parseInt(m[4]) : 0;
+  const min = m[5] ? parseInt(m[5]) : 0;
+  const sec = m[6] ? parseInt(m[6]) : 0;
+  // If 'Z' suffix, it's UTC — convert to local
+  if (str.endsWith('Z')) {
+    return new Date(Date.UTC(year, month, day, hour, min, sec));
+  }
+  return new Date(year, month, day, hour, min, sec);
+}
+
+function showIcalStatus(type, msg) {
+  const el = $('icalStatusArea');
+  el.className = 'mt-2 p-3 rounded-lg text-sm ' +
+    (type === 'success' ? 'bg-green-50 text-green-800' : type === 'error' ? 'bg-red-50 text-red-800' : 'bg-blue-50 text-blue-800');
+  el.textContent = (type === 'success' ? '✓ ' : type === 'error' ? '✗ ' : '') + msg;
+  el.classList.remove('hidden');
+}
+
+// ===== LOAD PARSED SHIFTS =====
+function loadParsedShifts(parsed) {
+  shifts = parsed;
+
+  // Tally hours by pay category
+  hours = { day: 0, evening: 0, weekend: 0, overnight: 0 };
+  CONFIG.leaveCategories.forEach(l => leaveHours[l.key] = 0);
+
+  shifts.forEach(s => {
+    if (leaveHours.hasOwnProperty(s.payCategory)) {
+      leaveHours[s.payCategory] += s.hours;
+    } else if (hours.hasOwnProperty(s.payCategory)) {
+      hours[s.payCategory] += s.hours;
+    }
+  });
+
+  // Detect pay period date range from ePTR entries
+  const allDates = parsed.map(s => parseDateStr(s.date.replace(/F$/, ''))).filter(d => d);
+  if (allDates.length > 0) {
+    payPeriodStart = new Date(Math.min(...allDates));
+    payPeriodEnd = new Date(Math.max(...allDates));
+    // Display pay period
+    const fmtD = d => `${d.getMonth()+1}/${d.getDate()}`;
+    $('ppRange').textContent = `${fmtD(payPeriodStart)} – ${fmtD(payPeriodEnd)}`;
+    $('ppRange').className = 'px-3 py-2 text-lg font-medium text-gray-900';
+  }
+
+  groupedShifts = groupIntoShifts(parsed);
+  renderShiftsWorked();
+  renderShiftsTable();
+  $('shiftsWorkedSection').classList.remove('hidden');
+  $('shiftsSection').classList.remove('hidden');
+  recalculate();
+  auditPaycheck();
+}
+
+// ===== GROUP ENTRIES INTO SHIFTS =====
+function groupIntoShifts(entries) {
+  // Group by base date (strip F) + MD Shift ID
+  const groups = {};
+  for (const e of entries) {
+    const baseDate = e.date.replace(/F$/, '').trim();
+    const key = baseDate + '||' + e.shiftId;
+    if (!groups[key]) {
+      groups[key] = { baseDate, shiftId: e.shiftId, type: e.type, entries: [] };
+    }
+    groups[key].entries.push(e);
+  }
+
+  // Build shift objects from groups
+  const result = [];
+  for (const g of Object.values(groups)) {
+    const totalHours = g.entries.reduce((sum, e) => sum + e.hours, 0);
+
+    // Get start/end from the entry data (Start/End columns)
+    let minStart = Infinity, maxEnd = 0;
+    for (const e of g.entries) {
+      if (e.startVal !== undefined) {
+        minStart = Math.min(minStart, e.startVal);
+        maxEnd = Math.max(maxEnd, e.endVal !== undefined ? e.endVal : 0);
+      }
+    }
+
+    // Detect location from shift ID
+    let location = 'unknown';
+    const sid = (g.shiftId || '').toUpperCase();
+    if (sid.includes('FON') || sid.includes('FMC')) location = 'fmc';
+    else if (sid.includes('OMC')) location = 'omc';
+    else if (sid.includes('GCN') || sid.includes('VMC')) location = 'gcn';
+
+    // Detect special types
+    const isEducation = /ET\s*[-–]?\s*Education/i.test(g.type) || /ET\s*[-–]?\s*Education/i.test(g.shiftId);
+    const isHoliday = /Holiday/i.test(g.type) || /Holiday/i.test(g.shiftId);
+    const isGCN = location === 'gcn';
+
+    // Check if this is a partial shift (starts at pay period boundary)
+    // F-flagged entries with start >= 24 on the first date of the period suggest continuation
+    const hasF = g.entries.some(e => e.date.endsWith('F'));
+    const allEntries = g.entries;
+    // If all entries are F-flagged, this shift started in the previous pay period
+    const allF = allEntries.every(e => e.date.endsWith('F'));
+    const isPartial = allF && hasF;
+
+    // Build pay category breakdown
+    const breakdown = {};
+    for (const e of g.entries) {
+      const cat = e.payCategory;
+      breakdown[cat] = (breakdown[cat] || 0) + e.hours;
+    }
+
+    // Identify the shift using hours as ground truth
+    // For partial shifts, try matching with the actual start time from the shift ID
+    let matchedShift = null;
+    if (!isEducation && !isHoliday && !isGCN && minStart !== Infinity) {
+      if (isPartial) {
+        // Partial shift: hours are truncated, so try to match using start time from shift ID instead
+        // Parse shift ID like "FON 2000-0800" to get actual shift start (20) and end (08/32)
+        const idTimeMatch = sid.match(/(\d{2})(\d{2})-(\d{2})(\d{2})/);
+        if (idTimeMatch) {
+          const idStart = parseInt(idTimeMatch[1]);
+          let idEnd = parseInt(idTimeMatch[3]);
+          if (idEnd <= idStart) idEnd += 24; // overnight
+          const fullHours = idEnd - idStart;
+          matchedShift = identifyShift(location, idStart, fullHours, sid);
+        }
+      } else {
+        matchedShift = identifyShift(location, minStart, totalHours, sid);
+      }
+    }
+
+    result.push({
+      baseDate: g.baseDate,
+      shiftId: g.shiftId,
+      totalHours,
+      minStart: minStart !== Infinity ? minStart : null,
+      maxEnd: maxEnd || null,
+      location,
+      isEducation, isHoliday, isGCN,
+      isPartial,
+      breakdown,
+      matchedShift,
+      entries: g.entries
+    });
+  }
+
+  // Sort by date
+  result.sort((a, b) => {
+    const da = parseDateStr(a.baseDate);
+    const db = parseDateStr(b.baseDate);
+    if (da && db) return da - db;
+    return a.baseDate.localeCompare(b.baseDate);
+  });
+
+  return result;
+}
+
+function parseDateStr(dateStr) {
+  // Parse "Mon 01/19/26" → Date
+  const m = dateStr.match(/(\d{2})\/(\d{2})\/(\d{2})/);
+  if (!m) return null;
+  return new Date(2000 + parseInt(m[3]), parseInt(m[1]) - 1, parseInt(m[2]));
+}
+
+function identifyShift(location, startTime, totalHours, shiftIdStr) {
+  // Use hours as ground truth, start time to disambiguate
+  // Step 1: Filter by location + hours (ground truth)
+  let candidates = SHIFTS.filter(s => {
+    if (location !== 'unknown' && s.loc !== location) return false;
+    if (Math.abs(s.hours - totalHours) > 0.5) return false;
+    return true;
+  });
+
+  if (candidates.length === 0 && location !== 'unknown') {
+    // Shift might be mislabeled — try all locations
+    candidates = SHIFTS.filter(s => Math.abs(s.hours - totalHours) <= 0.5);
+  }
+
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+
+  // Step 2: Narrow by start time — EXACT match first
+  const exactStart = candidates.filter(s => s.start === startTime);
+  if (exactStart.length >= 1) {
+    candidates = exactStart;
+  } else {
+    // Fallback: ±1 hour tolerance (for rounding/boundary quirks)
+    const nearStart = candidates.filter(s => Math.abs(s.start - startTime) === 1);
+    if (nearStart.length >= 1) candidates = nearStart;
+  }
+
+  if (candidates.length === 1) return candidates[0];
+
+  // Step 3: Use shift ID hints (PITT, FLEX, PEDS, Red/Blue, 1/2)
+  const sidUpper = shiftIdStr.toUpperCase();
+
+  if (sidUpper.includes('PITT')) {
+    const m = candidates.filter(s => s.name.toUpperCase().includes('PITT'));
+    if (m.length > 0) candidates = m;
+  } else if (sidUpper.includes('FLEX')) {
+    const m = candidates.filter(s => s.name.toUpperCase().includes('FLEX'));
+    if (m.length > 0) candidates = m;
+  } else if (sidUpper.includes('PEDS') || sidUpper.includes('PED')) {
+    const m = candidates.filter(s => s.name.toUpperCase().includes('PEDS') || s.name.toUpperCase().includes('PED'));
+    if (m.length > 0) candidates = m;
+  } else {
+    // No special keyword — exclude PITT/FLEX/PEDS variants
+    const nonSpecial = candidates.filter(s => {
+      const n = s.name.toUpperCase();
+      return !n.includes('PITT') && !n.includes('FLEX') && !n.includes('PEDS');
+    });
+    if (nonSpecial.length > 0) candidates = nonSpecial;
+  }
+
+  // Step 4: Try to distinguish Red(1) vs Blue(2) from shift ID number
+  if (candidates.length > 1) {
+    // Look for a number in the shift ID (e.g., "FON 2000-0800" — leading digit)
+    // Also check the shift ID time — extract start hour from "FON HHMM-HHMM"
+    const timeMatch = shiftIdStr.match(/(\d{2})(\d{2})-(\d{2})(\d{2})/);
+    if (timeMatch) {
+      const idStartH = parseInt(timeMatch[1]);
+      // Use the shift ID start hour to narrow (may differ from actual due to mislabeling)
+      const byIdStart = candidates.filter(s => s.start === idStartH);
+      if (byIdStart.length >= 1 && byIdStart.length < candidates.length) candidates = byIdStart;
+    }
+  }
+
+  return candidates[0]; // best match (may still have ambiguity for Red vs Blue)
+}
+
+// ===== RENDER SHIFTS WORKED =====
+function renderShiftsWorked() {
+  const tbody = $('shiftsWorkedBody');
+  tbody.innerHTML = '';
+  $('shiftsWorkedCount').textContent = groupedShifts.length + ' shifts';
+  const hasPartial = groupedShifts.some(g => g.isPartial);
+  $('shiftsWorkedFootnote').classList.toggle('hidden', !hasPartial);
+
+  for (const g of groupedShifts) {
+    const tr = document.createElement('tr');
+    tr.className = 'border-t hover:bg-gray-50';
+
+    // Date (just day name + date)
+    const dateDisplay = g.baseDate;
+
+    // Shift name
+    let shiftName, shiftClass;
+    if (g.isEducation) {
+      shiftName = 'Education Half Day';
+      shiftClass = 'text-sky-700';
+    } else if (g.isHoliday) {
+      shiftName = 'Holiday';
+      shiftClass = 'text-rose-700';
+    } else if (g.isGCN) {
+      shiftName = 'GCN (Virtual)';
+      shiftClass = 'text-teal-700';
+    } else if (g.matchedShift) {
+      shiftName = g.matchedShift.name;
+      if (g.isPartial) shiftName += ' *';
+      shiftClass = 'text-gray-900';
+    } else {
+      shiftName = g.shiftId || 'Unknown';
+      shiftClass = 'text-gray-500 italic';
+    }
+
+    // Breakdown chips
+    const breakdownHtml = Object.entries(g.breakdown).map(([cat, h]) => {
+      const colors = {
+        day: 'bg-emerald-100 text-emerald-800',
+        evening: 'bg-purple-100 text-purple-800',
+        weekend: 'bg-orange-100 text-orange-800',
+        overnight: 'bg-indigo-100 text-indigo-800',
+        education: 'bg-sky-100 text-sky-800',
+        holiday: 'bg-rose-100 text-rose-800'
+      };
+      const labels = { day: 'Day', evening: 'Eve', weekend: 'Wknd', overnight: 'ON', education: 'Edu', holiday: 'Hol' };
+      return `<span class="inline-block px-1.5 py-0.5 rounded text-xs font-medium ${colors[cat] || 'bg-gray-100'}">${labels[cat] || cat} ${h}h</span>`;
+    }).join(' ');
+
+    // Time display
+    let timeDisplay = '';
+    if (g.minStart !== null && !g.isEducation && !g.isHoliday) {
+      const startH = g.minStart % 24;
+      const endH = g.maxEnd % 24;
+      const fmtT = h => { const hr = h % 12 || 12; const ap = h < 12 ? 'a' : 'p'; return hr + ap; };
+      timeDisplay = fmtT(startH) + '-' + fmtT(endH);
+    }
+
+    tr.innerHTML = `
+      <td class="px-4 py-2 font-mono text-xs">${dateDisplay}</td>
+      <td class="px-4 py-2 font-medium text-sm ${shiftClass}">${shiftName}</td>
+      <td class="px-4 py-2 text-xs text-gray-400 font-mono">${timeDisplay}</td>
+      <td class="px-4 py-2 text-right font-bold">${g.totalHours}h</td>
+      <td class="px-4 py-2">${breakdownHtml}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+// ===== RENDER SHIFTS TABLE =====
+function renderShiftsTable() {
+  const tbody = $('shiftsTableBody');
+  tbody.innerHTML = '';
+  $('shiftCount').textContent = shifts.length + ' entries';
+
+  shifts.forEach(s => {
+    const tr = document.createElement('tr');
+    const isLeave = ['education','holiday'].includes(s.payCategory);
+    tr.className = 'border-t hover:bg-gray-50 ' + (isLeave ? 'bg-sky-50' : '');
+    tr.innerHTML = `
+      <td class="px-4 py-1.5 font-mono text-xs">${s.date}</td>
+      <td class="px-4 py-1.5 text-xs text-gray-600 max-w-[200px] truncate" title="${s.shiftId}">${s.shiftId || '—'}</td>
+      <td class="px-4 py-1.5 font-mono text-xs">${s.session}</td>
+      <td class="px-4 py-1.5 text-right font-medium">${s.hours}</td>
+      <td class="px-4 py-1.5 font-mono text-xs text-gray-500">${s.trcRaw}</td>
+      <td class="px-4 py-1.5 text-xs font-medium ${getCategoryColor(s.payCategory)}">${getCategoryLabel(s.payCategory) || s.payCategory}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ===== MANUAL ENTRY =====
+function initManualGrid() {
+  if ($('manualGrid').children.length > 0) return;
+  const cats = [
+    { key: 'day', label: 'Day Hours (WD)', placeholder: 'e.g. 12' },
+    { key: 'evening', label: 'Evening Hours (WEV)', placeholder: 'e.g. 8' },
+    { key: 'weekend', label: 'Weekend Hours (WKN)', placeholder: 'e.g. 16' },
+    { key: 'overnight', label: 'Overnight Hours (WO)', placeholder: 'e.g. 24' },
+    { key: 'education', label: 'Education Hours (ET)', placeholder: 'e.g. 8' },
+    { key: 'holiday', label: 'Holiday Hours (H)', placeholder: 'e.g. 0' },
+    { key: 'vacation', label: 'Vacation Hours (VAC)', placeholder: 'e.g. 0' },
+    { key: 'sick', label: 'Sick Hours (SL)', placeholder: 'e.g. 0' },
+    { key: 'edLeave', label: 'Ed Leave Hours', placeholder: 'e.g. 0' },
+    { key: 'indirect', label: 'Indirect Work Hours', placeholder: 'e.g. 0' }
+  ];
+  cats.forEach(c => {
+    const div = document.createElement('div');
+    div.innerHTML = `
+      <label class="block text-xs font-medium text-gray-600 mb-1">${c.label}</label>
+      <input type="number" min="0" step="1" placeholder="${c.placeholder}" id="manual_${c.key}"
+             class="w-full px-3 py-2 border rounded-lg text-center font-medium focus:ring-2 focus:ring-blue-500 text-lg">
+    `;
+    $('manualGrid').appendChild(div);
+  });
+}
+
+function processManual() {
+  hideError();
+  hours = {
+    day: parseFloat($('manual_day')?.value) || 0,
+    evening: parseFloat($('manual_evening')?.value) || 0,
+    weekend: parseFloat($('manual_weekend')?.value) || 0,
+    overnight: parseFloat($('manual_overnight')?.value) || 0
+  };
+  leaveHours.education = parseFloat($('manual_education')?.value) || 0;
+  leaveHours.holiday = parseFloat($('manual_holiday')?.value) || 0;
+  leaveHours.vacation = parseFloat($('manual_vacation')?.value) || 0;
+  leaveHours.sick = parseFloat($('manual_sick')?.value) || 0;
+  leaveHours.edLeave = parseFloat($('manual_edLeave')?.value) || 0;
+  leaveHours.indirect = parseFloat($('manual_indirect')?.value) || 0;
+  shifts = []; // no individual shifts in manual mode
+  summaryWs = null;
+  recalculate();
+}
+
+// ===== PAY CALCULATION =====
+function recalculate() {
+  const salary = parseFloat($('salaryInput').value) || 0;
+  if (!salary) {
+    showError('Please enter your monthly salary to calculate pay.');
+    return;
+  }
+  hideError();
+
+  // Kaiser rounds base rate to 3 decimal places
+  const baseRate = Math.round(((salary * 12) / CONFIG.hoursPerYear) * 1000) / 1000;
+  const warnings = [];
+
+  // Build results rows
+  const rows = [];
+
+  // Shift categories
+  CONFIG.shiftCategories.forEach(cat => {
+    const h = hours[cat] || 0;
+    const mult = CONFIG.multipliers[cat];
+    const rate = baseRate * mult;
+    const pay = Math.round(h * rate * 100) / 100;
+    rows.push({ label: getCategoryLabel(cat), hours: h, ws: h/4, rate, mult, pay, isShift: true });
+  });
+
+  // Leave categories (always show education, holiday; others only if > 0)
+  CONFIG.leaveCategories.forEach(lt => {
+    const h = leaveHours[lt.key] || 0;
+    if (h > 0 || lt.key === 'education' || lt.key === 'holiday') {
+      const pay = Math.round(h * baseRate * 100) / 100;
+      rows.push({ label: lt.label, hours: h, ws: h/4, rate: baseRate, mult: 1.0, pay, isShift: false });
+    }
+  });
+
+  // Render
+  const tbody = $('resultsTableBody');
+  tbody.innerHTML = '';
+  let totalH = 0, totalW = 0, totalP = 0;
+  rows.forEach(r => {
+    totalH += r.hours; totalW += r.ws; totalP += r.pay;
+    if (r.hours === 0 && r.isShift) return; // skip zero-hour shift categories
+    const tr = document.createElement('tr');
+    tr.className = (r.isShift ? '' : 'bg-gray-50 ') + 'border-t';
+    tr.innerHTML = `
+      <td class="px-6 py-2 font-medium">${r.label}</td>
+      <td class="px-6 py-2 text-right font-mono">${r.hours.toFixed(1)}</td>
+      <td class="px-6 py-2 text-right font-mono text-gray-400">${r.ws.toFixed(2)}</td>
+      <td class="px-6 py-2 text-right font-mono">${fmt(r.rate)}</td>
+      <td class="px-6 py-2 text-right">${r.mult.toFixed(1)}×</td>
+      <td class="px-6 py-2 text-right font-mono font-medium">${fmt(r.pay)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  $('totalHours').textContent = totalH.toFixed(1);
+  $('totalWs').textContent = totalW.toFixed(2);
+  $('totalPay').textContent = fmt(totalP);
+  $('resultsSubtitle').textContent = `Base rate: ${fmt(baseRate)}/hr (${fmt(salary)}/mo × 12 ÷ ${CONFIG.hoursPerYear})`;
+
+  // Cross-check with summary table
+  if (summaryWs) {
+    let summaryTotalWs = 0;
+    for (const v of Object.values(summaryWs)) summaryTotalWs += v;
+    const calcTotalWs = totalW;
+    if (Math.abs(summaryTotalWs - calcTotalWs) < 0.01) {
+      $('crossCheckArea').classList.remove('hidden');
+      $('crossCheckText').textContent = `✓ Cross-check passed: ${calcTotalWs.toFixed(2)} W's matches ePTR summary (${summaryTotalWs.toFixed(1)})`;
+    } else {
+      warnings.push(`W's total mismatch: calculated ${calcTotalWs.toFixed(2)} vs ePTR summary ${summaryTotalWs.toFixed(1)}`);
+      $('crossCheckArea').classList.add('hidden');
+    }
+  } else {
+    $('crossCheckArea').classList.add('hidden');
+  }
+
+  if (warnings.length > 0) {
+    $('warningsList').innerHTML = warnings.map(w => `<li>⚠ ${w}</li>`).join('');
+    $('warningsSection').classList.remove('hidden');
+  } else {
+    $('warningsSection').classList.add('hidden');
+  }
+
+  $('resultsSection').classList.remove('hidden');
+  updateDifference();
+  checkHourRequirements();
+
+  // Re-run audit after recalculation (pay diff might have changed)
+  if (groupedShifts.length > 0) auditPaycheck();
+}
+
+function recalcIfReady() {
+  if (Object.values(hours).some(h => h > 0) || Object.values(leaveHours).some(h => h > 0)) {
+    recalculate();
+  }
+}
+
+function updateDifference() {
+  const actual = parseFloat($('actualPayInput').value);
+  const totalPay = parseFloat($('totalPay').textContent.replace(/[$,]/g, ''));
+  if (!actual || !totalPay) { $('differenceArea').classList.add('hidden'); return; }
+  const diff = totalPay - actual;
+  const el = $('differenceDisplay');
+  const absDiff = Math.abs(diff);
+  if (absDiff < 1) {
+    el.className = 'p-3 rounded-lg text-center font-medium bg-green-100 text-green-800';
+    el.textContent = '✓ Exact match!';
+  } else if (absDiff < 50) {
+    el.className = 'p-3 rounded-lg text-center font-medium bg-green-50 text-green-700';
+    el.textContent = `≈ Close (${diff > 0 ? '+' : ''}${fmt(diff)})`;
+  } else {
+    el.className = 'p-3 rounded-lg text-center font-medium bg-red-50 text-red-700';
+    el.textContent = `Difference: ${diff > 0 ? '+' : ''}${fmt(diff)} ${diff > 0 ? '(calc higher)' : '(calc lower)'}`;
+  }
+  $('differenceArea').classList.remove('hidden');
+  if (groupedShifts.length > 0) auditPaycheck();
+}
+
+// ===== PAYCHECK AUDIT =====
+function saveExpectedShifts() {
+  try { localStorage.setItem('eptr_expected_shifts', $('expectedShiftsInput').value); } catch(e) {}
+}
+function loadExpectedShifts() {
+  try {
+    const s = localStorage.getItem('eptr_expected_shifts');
+    if (s) $('expectedShiftsInput').value = s;
+  } catch(e) {}
+}
+function runAuditIfReady() {
+  if (groupedShifts.length > 0) auditPaycheck();
+}
+
+function auditPaycheck() {
+  const issues = []; // { severity: 'red'|'yellow', message, detail }
+
+  // Count clinical shifts (not education, not holiday, not GCN)
+  const clinicalShifts = groupedShifts.filter(g => !g.isEducation && !g.isHoliday && !g.isGCN);
+  const totalWorkHours = Object.values(hours).reduce((s,h) => s + h, 0);
+  const ruleLeaveHours = getRuleLeaveHours();
+  const totalWorkWs = totalWorkHours / 4;
+  const totalLeaveWs = ruleLeaveHours / 4;
+  const totalWsAll = totalWorkWs + totalLeaveWs;
+
+  // 1. Missing ET check: if worked ≥1 hour but no ET on ePTR
+  if (totalWorkHours >= 1 && leaveHours.education === 0) {
+    issues.push({
+      severity: 'red',
+      message: 'Missing Education Time (ET)',
+      detail: `You worked ${totalWorkHours}h this pay period but no ET hours are on the ePTR. You should receive 8h ET (2 W\'s) if you worked at least 1 hour.`
+    });
+  }
+
+  // 2. Expected shift count mismatch
+  const expectedShifts = parseInt($('expectedShiftsInput').value) || 0;
+  if (expectedShifts > 0) {
+    if (clinicalShifts.length < expectedShifts) {
+      const missing = expectedShifts - clinicalShifts.length;
+      issues.push({
+        severity: 'red',
+        message: `Missing ${missing} shift${missing > 1 ? 's' : ''}`,
+        detail: `You expected ${expectedShifts} clinical shifts but only ${clinicalShifts.length} are on the ePTR. ${missing} shift${missing > 1 ? 's were' : ' was'} not entered by the clerk.`
+      });
+    } else if (clinicalShifts.length > expectedShifts) {
+      issues.push({
+        severity: 'yellow',
+        message: `More shifts than expected`,
+        detail: `ePTR shows ${clinicalShifts.length} clinical shifts but you expected ${expectedShifts}. Double-check that all shifts are yours.`
+      });
+    }
+  }
+
+  // 3. Shift hours mismatch (actual vs expected from shift database)
+  for (const g of clinicalShifts) {
+    if (g.matchedShift && !g.isPartial) {
+      const expected = g.matchedShift.hours;
+      const actual = g.totalHours;
+      if (Math.abs(actual - expected) > 0.5) {
+        issues.push({
+          severity: actual < expected ? 'red' : 'yellow',
+          message: `Wrong hours on ${g.baseDate}`,
+          detail: `${g.matchedShift.name} should be ${expected}h but ePTR shows ${actual}h (${actual < expected ? 'missing ' + (expected - actual) + 'h' : 'extra ' + (actual - expected) + 'h'}).`
+        });
+      }
+    }
+  }
+
+  // 4. Unmatched shifts (could be a data entry error)
+  for (const g of clinicalShifts) {
+    if (!g.matchedShift && !g.isPartial) {
+      issues.push({
+        severity: 'yellow',
+        message: `Unrecognized shift on ${g.baseDate}`,
+        detail: `Shift "${g.shiftId}" (${g.totalHours}h) doesn't match any known shift pattern. Verify the hours and shift code are correct.`
+      });
+    }
+  }
+
+  // 5. Check for holiday that should be present (if pay period contains a known holiday)
+  // We can check if the pay period contains MLK Day (Jan), Presidents Day (Feb), etc.
+  // For now, just note if holiday hours are 0 and we detect a holiday in the date range
+  const payPeriodDates = groupedShifts.map(g => parseDateStr(g.baseDate)).filter(d => d);
+  if (payPeriodDates.length > 0) {
+    const holidays2026 = [
+      { month: 0, day: 1, name: "New Year's Day" },
+      { month: 0, day: 19, name: 'MLK Day' },
+      { month: 1, day: 16, name: "Presidents' Day" },
+      { month: 4, day: 25, name: 'Memorial Day' },
+      { month: 6, day: 3, name: 'Independence Day' },
+      { month: 8, day: 7, name: 'Labor Day' },
+      { month: 10, day: 26, name: 'Thanksgiving' },
+      { month: 11, day: 25, name: 'Christmas' }
+    ];
+    const minDate = new Date(Math.min(...payPeriodDates));
+    const maxDate = new Date(Math.max(...payPeriodDates));
+    for (const hol of holidays2026) {
+      const holDate = new Date(2026, hol.month, hol.day);
+      if (holDate >= minDate && holDate <= maxDate && leaveHours.holiday === 0) {
+        issues.push({
+          severity: 'yellow',
+          message: `Possible missing holiday pay`,
+          detail: `${hol.name} (${hol.month+1}/${hol.day}) falls in this pay period but no holiday hours (H) are on the ePTR.`
+        });
+      }
+    }
+  }
+
+  // 6. Check for very low total hours (might indicate missing shifts)
+  if (totalWorkHours > 0 && totalWorkHours < 20 && expectedShifts === 0) {
+    issues.push({
+      severity: 'yellow',
+      message: 'Low total work hours',
+      detail: `Only ${totalWorkHours}h of work hours this pay period. If you worked more shifts, enter your expected shift count above to check for missing entries.`
+    });
+  }
+
+  // 7. Pay difference check
+  const actualPay = parseFloat($('actualPayInput').value) || 0;
+  const calcPay = parseFloat(($('totalPay').textContent || '').replace(/[$,]/g, '')) || 0;
+  if (actualPay > 0 && calcPay > 0) {
+    const diff = calcPay - actualPay;
+    if (Math.abs(diff) > 1) {
+      issues.push({
+        severity: Math.abs(diff) > 100 ? 'red' : 'yellow',
+        message: `Pay discrepancy: ${diff > 0 ? '+' : ''}${fmt(diff)}`,
+        detail: `Calculator shows ${fmt(calcPay)} but your paycheck is ${fmt(actualPay)}. ${diff > 0 ? 'You may be underpaid.' : 'Check if extra deductions apply.'}`
+      });
+    }
+  }
+
+  // 8. Hour requirement checks
+  const schedType = $('scheduleTypeInput').value;
+  if (schedType !== 'perDiem') {
+    const cfg = getScheduleConfig(schedType);
+
+    // Check pay period minimum
+    if (totalWorkWs > 0 && totalWorkWs < cfg.minWsPerPP) {
+      issues.push({
+        severity: 'red',
+        message: `Below pay period minimum (${schedType})`,
+        detail: `You have ${totalWorkWs.toFixed(1)} worked W's this pay period but ${schedType} requires a minimum of ${cfg.minWsPerPP} worked W's. You need ${(cfg.minWsPerPP - totalWorkWs).toFixed(1)} more W's.`
+      });
+    }
+
+    // Check averaging cycle pace
+    if (totalWsAll > 0 && totalWsAll < cfg.targetWsPerPP) {
+      issues.push({
+        severity: 'yellow',
+        message: `Below averaging cycle target`,
+        detail: `This pay period has ${totalWsAll.toFixed(1)} total W's (worked + paid leave), which is below the ${cfg.targetWsPerPP} W's/PP averaging target. Make sure other pay periods in this cycle compensate.`
+      });
+    }
+
+    // Check max paid leave per pay period
+    if (totalLeaveWs > cfg.maxLeaveWsPerPP) {
+      issues.push({
+        severity: 'red',
+        message: `Above paid leave ceiling`,
+        detail: `You have ${totalLeaveWs.toFixed(1)} paid leave W's this pay period, but the maximum is ${cfg.maxLeaveWsPerPP} W's.`
+      });
+    }
+  } else {
+    const fah = parseFloat($('fahInput').value) || 0;
+    if (fah > 0) {
+      const cap = fah * 0.45;
+      if (totalWorkHours > cap) {
+        issues.push({
+          severity: 'red',
+          message: 'Per Diem cap exceeded',
+          detail: `Worked ${totalWorkHours.toFixed(1)}h this pay period. Cap is 45% of FAH: ${cap.toFixed(1)}h.`
+        });
+      }
+    }
+  }
+
+  // 9. QGenda schedule comparison (if iCal loaded)
+  if (scheduledShifts.length > 0 && payPeriodStart && payPeriodEnd) {
+    const scheduleIssues = compareScheduleToEptr();
+    issues.push(...scheduleIssues);
+  }
+
+  renderIssues(issues);
+}
+
+function compareScheduleToEptr() {
+  const issues = [];
+
+  // Filter QGenda events to this pay period (with 1 day buffer for overnight shifts)
+  const ppStart = new Date(payPeriodStart);
+  ppStart.setHours(0,0,0,0);
+  const ppEnd = new Date(payPeriodEnd);
+  ppEnd.setHours(23,59,59,999);
+
+  // Get scheduled shifts in the pay period
+  // Exclude events that look like non-clinical (education, admin, etc.)
+  const nonClinicalPatterns = /\b(education|ed leave|vacation|sick|pto|admin|meeting|conference|cme|off|block)\b/i;
+  const scheduledInPeriod = scheduledShifts.filter(ev => {
+    if (!ev.dtstart) return false;
+    const evDate = new Date(ev.dtstart);
+    evDate.setHours(0,0,0,0);
+    return evDate >= ppStart && evDate <= ppEnd;
+  });
+
+  const clinicalScheduled = scheduledInPeriod.filter(ev => !nonClinicalPatterns.test(ev.summary || ''));
+  const nonClinicalScheduled = scheduledInPeriod.filter(ev => nonClinicalPatterns.test(ev.summary || ''));
+
+  if (clinicalScheduled.length === 0) return issues; // no scheduled clinical shifts to compare
+
+  // Build ePTR dates set (base dates of grouped clinical shifts)
+  const eptrDates = new Set();
+  const clinicalShifts = groupedShifts.filter(g => !g.isEducation && !g.isHoliday && !g.isGCN);
+  for (const g of clinicalShifts) {
+    const d = parseDateStr(g.baseDate);
+    if (d) {
+      // Store as YYYY-MM-DD for comparison
+      eptrDates.add(d.toISOString().slice(0, 10));
+    }
+  }
+
+  // Check each scheduled clinical shift against ePTR
+  const missingDates = [];
+  for (const ev of clinicalScheduled) {
+    const evDate = new Date(ev.dtstart);
+    const dateKey = evDate.toISOString().slice(0, 10);
+    if (!eptrDates.has(dateKey)) {
+      const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      const dayName = dayNames[evDate.getDay()];
+      const dateStr = `${dayName} ${evDate.getMonth()+1}/${evDate.getDate()}`;
+      missingDates.push({ dateStr, summary: ev.summary || 'Unknown shift', date: evDate });
+    }
+  }
+
+  if (missingDates.length > 0) {
+    // Sort by date
+    missingDates.sort((a,b) => a.date - b.date);
+    const dateList = missingDates.map(d => `${d.dateStr} (${d.summary})`).join(', ');
+    issues.push({
+      severity: 'red',
+      message: `${missingDates.length} scheduled shift${missingDates.length > 1 ? 's' : ''} missing from ePTR`,
+      detail: `Per your QGenda schedule, you were scheduled to work on: ${dateList}. These shifts are not on the ePTR — the clerk may not have entered them.`
+    });
+  }
+
+  // Also check if ePTR has shifts that aren't on the schedule (possible error)
+  const scheduledDateSet = new Set();
+  for (const ev of clinicalScheduled) {
+    scheduledDateSet.add(new Date(ev.dtstart).toISOString().slice(0, 10));
+  }
+
+  const extraEptrDates = [];
+  for (const g of clinicalShifts) {
+    const d = parseDateStr(g.baseDate);
+    if (d && !scheduledDateSet.has(d.toISOString().slice(0, 10))) {
+      extraEptrDates.push(g.baseDate);
+    }
+  }
+
+  if (extraEptrDates.length > 0) {
+    issues.push({
+      severity: 'yellow',
+      message: `${extraEptrDates.length} ePTR shift${extraEptrDates.length > 1 ? 's' : ''} not on QGenda schedule`,
+      detail: `ePTR has shifts on ${extraEptrDates.join(', ')} that aren't on your QGenda schedule. This could be a swap/add-on, or a data entry error.`
+    });
+  }
+
+  // Summary: if schedule matches ePTR exactly for clinical shifts, note it
+  if (missingDates.length === 0 && extraEptrDates.length === 0) {
+    // All good — schedule matches. Auto-update expected shifts count
+    $('expectedShiftsInput').value = clinicalScheduled.length;
+  }
+
+  return issues;
+}
+
+function renderIssues(issues) {
+  const section = $('issuesSection');
+  const box = $('issuesBox');
+  const list = $('issuesList');
+  const copyBtn = $('copyIssuesBtn');
+
+  if (issues.length === 0) {
+    // All clear
+    section.classList.remove('hidden');
+    box.className = 'rounded-xl border p-5 bg-green-50 border-green-200';
+    $('issuesIcon').textContent = '✓';
+    $('issuesTitle').textContent = 'No Issues Found';
+    $('issuesTitle').className = 'text-lg font-bold text-green-800';
+    $('issuesCount').className = 'hidden';
+    list.innerHTML = '<p class="text-green-700">All shifts, hours, and pay categories look correct.</p>';
+    copyBtn.classList.add('hidden');
+    return;
+  }
+
+  const redCount = issues.filter(i => i.severity === 'red').length;
+  const yellowCount = issues.filter(i => i.severity === 'yellow').length;
+
+  section.classList.remove('hidden');
+  if (redCount > 0) {
+    box.className = 'rounded-xl border-2 p-5 bg-red-50 border-red-300';
+    $('issuesIcon').textContent = '!';
+    $('issuesTitle').textContent = 'Paycheck Issues Found';
+    $('issuesTitle').className = 'text-lg font-bold text-red-800';
+    $('issuesCount').textContent = `${redCount} critical, ${yellowCount} warning${yellowCount !== 1 ? 's' : ''}`;
+    $('issuesCount').className = 'text-xs font-medium px-2 py-0.5 rounded-full bg-red-200 text-red-800';
+  } else {
+    box.className = 'rounded-xl border-2 p-5 bg-amber-50 border-amber-300';
+    $('issuesIcon').textContent = '⚠';
+    $('issuesTitle').textContent = 'Potential Issues';
+    $('issuesTitle').className = 'text-lg font-bold text-amber-800';
+    $('issuesCount').textContent = `${yellowCount} warning${yellowCount !== 1 ? 's' : ''}`;
+    $('issuesCount').className = 'text-xs font-medium px-2 py-0.5 rounded-full bg-amber-200 text-amber-800';
+  }
+
+  list.innerHTML = issues.map(i => {
+    const isRed = i.severity === 'red';
+    return `
+      <div class="flex gap-3 p-3 rounded-lg ${isRed ? 'bg-red-100/60' : 'bg-amber-100/60'}">
+        <span class="text-lg leading-none mt-0.5">${isRed ? '🔴' : '🟡'}</span>
+        <div>
+          <p class="font-semibold ${isRed ? 'text-red-900' : 'text-amber-900'}">${i.message}</p>
+          <p class="${isRed ? 'text-red-700' : 'text-amber-700'} text-xs mt-0.5">${i.detail}</p>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  copyBtn.classList.remove('hidden');
+
+  // Store issues for clipboard
+  window._auditIssues = issues;
+}
+
+function copyIssuesToClipboard() {
+  const issues = window._auditIssues || [];
+  if (issues.length === 0) return;
+
+  const payPeriod = $('ppRange').textContent || 'Unknown pay period';
+  let text = `ePTR Issues — ${payPeriod}\n${'─'.repeat(40)}\n\n`;
+
+  issues.forEach((i, idx) => {
+    const marker = i.severity === 'red' ? '[ACTION NEEDED]' : '[CHECK]';
+    text += `${idx + 1}. ${marker} ${i.message}\n   ${i.detail}\n\n`;
+  });
+
+  text += `─────\nGenerated by ePTR Paycheck Calculator`;
+
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = $('copyIssuesBtn');
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    btn.classList.add('bg-green-100', 'text-green-700', 'border-green-300');
+    setTimeout(() => {
+      btn.textContent = orig;
+      btn.classList.remove('bg-green-100', 'text-green-700', 'border-green-300');
+    }, 2000);
+  });
+}
+
+// ===== SCHEDULE TYPE & HOUR REQUIREMENTS =====
+const SCHEDULE_CONFIG = {
+  '10/10': { fte: 1.0, label: '10/10', description: '10 shifts on / 10 shifts off' },
+  '8/10':  { fte: 0.8, label: '8/10', description: '8 shifts on / 10 shifts off' },
+  '5/10':  { fte: 0.5, label: '5/10', description: '5 shifts on / 10 shifts off' },
+  'perDiem': { fte: null, label: 'Per Diem', description: 'No minimum requirement', isPerDiem: true }
+};
+function getScheduleConfig(type) {
+  const base = SCHEDULE_CONFIG[type];
+  if (!base) return null;
+  if (base.isPerDiem) return { ...base };
+  const targetWsPerPP = 20 * base.fte;
+  const minWsPerPP = targetWsPerPP - 4;
+  const maxLeaveWsPerPP = targetWsPerPP;
+  const cycleTargetWs = targetWsPerPP * 4;
+  return { ...base, targetWsPerPP, minWsPerPP, maxLeaveWsPerPP, cycleTargetWs };
+}
+const AVG_CYCLE_WEEKS = 8; // 8-week cycles
+const AVG_CYCLE_DAYS = 56; // 8 weeks in days
+
+// Anchor cycle: 12/08/25 to 02/01/26
+const ANCHOR_CYCLE_START = new Date(2025, 11, 8); // Dec 8, 2025
+const ANCHOR_CYCLE_END = new Date(2026, 1, 1);     // Feb 1, 2026
+
+function saveScheduleType() {
+  try { localStorage.setItem('eptr_schedule_type', $('scheduleTypeInput').value); } catch(e) {}
+  updateScheduleLabel();
+  if (scheduledShifts.length > 0) checkAveragingCyclesFromIcs();
+}
+function loadScheduleType() {
+  try {
+    const s = localStorage.getItem('eptr_schedule_type');
+    if (s) $('scheduleTypeInput').value = s;
+  } catch(e) {}
+  updateScheduleLabel();
+}
+function updateScheduleLabel() {
+  const type = $('scheduleTypeInput').value;
+  const cfg = getScheduleConfig(type);
+  if (type === 'perDiem') {
+    const fah = parseFloat($('fahInput').value) || 0;
+    $('scheduleMinLabel').textContent = fah > 0
+      ? `Cap ${ (fah * 0.45).toFixed(1) }h per pay period (45% of FAH)`
+      : 'Cap 45% of FAH per pay period';
+    $('perDiemFahWrap').classList.remove('hidden');
+  } else {
+    $('scheduleMinLabel').textContent = `Min ${cfg.minWsPerPP} W's/pay period`;
+    $('perDiemFahWrap').classList.add('hidden');
+  }
+}
+
+function saveFah() {
+  try { localStorage.setItem('eptr_fah_hours', $('fahInput').value); } catch(e) {}
+  updateScheduleLabel();
+}
+function loadFah() {
+  try {
+    const v = localStorage.getItem('eptr_fah_hours');
+    if (v) $('fahInput').value = v;
+  } catch(e) {}
+}
+
+// Calculate all averaging cycles from anchor
+function getAveragingCycles(fromDate, toDate) {
+  const cycles = [];
+  // Go backward from anchor to find earliest relevant cycle
+  let cycleStart = new Date(ANCHOR_CYCLE_START);
+
+  // Go backward enough to cover any date range
+  while (cycleStart > new Date(2024, 0, 1)) {
+    cycleStart = new Date(cycleStart.getTime() - AVG_CYCLE_DAYS * 24 * 60 * 60 * 1000);
+  }
+
+  // Now go forward generating cycles
+  while (cycleStart < new Date(2028, 0, 1)) {
+    const cycleEnd = new Date(cycleStart.getTime() + (AVG_CYCLE_DAYS - 1) * 24 * 60 * 60 * 1000);
+    cycles.push({ start: new Date(cycleStart), end: new Date(cycleEnd) });
+    cycleStart = new Date(cycleEnd.getTime() + 24 * 60 * 60 * 1000); // next day
+  }
+
+  return cycles;
+}
+
+// Find which averaging cycle a date falls in
+function findCycleForDate(date) {
+  const cycles = getAveragingCycles();
+  for (const c of cycles) {
+    if (date >= c.start && date <= c.end) return c;
+  }
+  return null;
+}
+
+// Get pay periods within a cycle (each is 2 weeks = 14 days)
+function getPayPeriodsInCycle(cycle) {
+  const pps = [];
+  let ppStart = new Date(cycle.start);
+  while (ppStart <= cycle.end) {
+    const ppEnd = new Date(ppStart.getTime() + 13 * 24 * 60 * 60 * 1000);
+    pps.push({ start: new Date(ppStart), end: ppEnd > cycle.end ? new Date(cycle.end) : ppEnd });
+    ppStart = new Date(ppEnd.getTime() + 24 * 60 * 60 * 1000);
+  }
+  return pps;
+}
+
+function checkHourRequirements() {
+  const schedType = $('scheduleTypeInput').value;
+  const cfg = getScheduleConfig(schedType);
+
+  // If per diem, hide the section
+  if (schedType === 'perDiem') {
+    $('hourReqSection').classList.add('hidden');
+    return;
+  }
+
+  // Calculate total W's for current pay period
+  const totalWorkWsCurrent = Object.values(hours).reduce((s, h) => s + h, 0) / 4;
+  const totalLeaveWsCurrent = getRuleLeaveHours() / 4;
+  const totalWsCurrent = totalWorkWsCurrent + totalLeaveWsCurrent;
+
+  // Show section
+  $('hourReqSection').classList.remove('hidden');
+  $('hourReqSubtitle').textContent = `${cfg.label} schedule — min ${cfg.minWsPerPP} W's/pay period, avg ${cfg.targetWsPerPP} W's/pay period over 8-week cycle, max paid leave ${cfg.maxLeaveWsPerPP} W's/PP`;
+
+  // === Pay Period Minimum Check ===
+  const ppMinMet = totalWorkWsCurrent >= cfg.minWsPerPP;
+  const ppPct = cfg.minWsPerPP > 0 ? Math.min(100, (totalWorkWsCurrent / cfg.minWsPerPP) * 100) : 100;
+  $('ppMinBar').style.width = ppPct + '%';
+  $('ppMinBar').className = `h-3 rounded-full transition-all duration-500 ${ppMinMet ? 'bg-green-500' : 'bg-red-500'}`;
+  $('ppMinStatus').textContent = `${totalWorkWsCurrent.toFixed(1)} / ${cfg.minWsPerPP} W's`;
+  $('ppMinStatus').className = `text-sm font-semibold ${ppMinMet ? 'text-green-700' : 'text-red-700'}`;
+  $('ppMinDetail').textContent = ppMinMet
+    ? `✓ Pay period minimum met (${(totalWorkWsCurrent - cfg.minWsPerPP).toFixed(1)} W's above minimum)`
+    : `✗ ${(cfg.minWsPerPP - totalWorkWsCurrent).toFixed(1)} more W's needed to meet pay period minimum`;
+
+  // === Averaging Cycle Check ===
+  if (payPeriodStart) {
+    const currentCycle = findCycleForDate(payPeriodStart);
+    if (currentCycle) {
+      const fmtD = d => `${d.getMonth()+1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`;
+      $('avgCycleDates').textContent = `Cycle: ${fmtD(currentCycle.start)} – ${fmtD(currentCycle.end)}`;
+
+      const payPeriods = getPayPeriodsInCycle(currentCycle);
+      const totalPPs = payPeriods.length;
+      const targetTotalWs = cfg.targetWsPerPP * totalPPs;
+
+      // For now, we only know the current pay period's W's
+      // Show what's needed for the cycle
+      const currentAvg = totalWsCurrent; // just this PP so far
+      const avgTarget = cfg.targetWsPerPP;
+      const avgPct = Math.min(100, (totalWsCurrent / avgTarget) * 100);
+
+      $('avgCycleBar').style.width = avgPct + '%';
+      const avgMet = totalWsCurrent >= avgTarget;
+      $('avgCycleBar').className = `h-3 rounded-full transition-all duration-500 ${avgMet ? 'bg-green-500' : totalWsCurrent >= avgTarget * 0.75 ? 'bg-yellow-500' : 'bg-red-500'}`;
+      $('avgCycleStatus').textContent = `${totalWsCurrent.toFixed(1)} / ${avgTarget} W's (this PP)`;
+      $('avgCycleStatus').className = `text-sm font-semibold ${avgMet ? 'text-green-700' : 'text-amber-700'}`;
+
+      // Determine which PP in the cycle this is
+      let ppIndex = -1;
+      for (let i = 0; i < payPeriods.length; i++) {
+        if (payPeriodStart >= payPeriods[i].start && payPeriodStart <= payPeriods[i].end) {
+          ppIndex = i;
+          break;
+        }
+      }
+
+      if (ppIndex >= 0) {
+        const remainingPPs = totalPPs - (ppIndex + 1);
+        const wsNeededTotal = targetTotalWs;
+        const wsRemaining = wsNeededTotal - totalWsCurrent;
+        if (remainingPPs > 0) {
+          const wsPerRemainingPP = wsRemaining / remainingPPs;
+          $('avgCycleDetail').textContent = avgMet
+            ? `This is pay period ${ppIndex + 1} of ${totalPPs}. On track — need avg ${wsPerRemainingPP.toFixed(1)} W's in remaining ${remainingPPs} PP(s) to maintain ${avgTarget} W's/PP average.`
+            : `This is pay period ${ppIndex + 1} of ${totalPPs}. Need avg ${wsPerRemainingPP.toFixed(1)} W's in remaining ${remainingPPs} PP(s) to reach ${avgTarget} W's/PP cycle average.`;
+        } else {
+          $('avgCycleDetail').textContent = `Last pay period of cycle. ${avgMet ? 'Cycle target met!' : `Cycle target NOT met — below ${avgTarget} W's/PP average.`}`;
+        }
+      }
+
+      // Show pay period breakdown
+      $('avgCycleBreakdown').classList.remove('hidden');
+      const ppList = $('avgCyclePPList');
+      ppList.innerHTML = '';
+      for (let i = 0; i < payPeriods.length; i++) {
+        const pp = payPeriods[i];
+        const isCurrent = ppIndex === i;
+        const div = document.createElement('div');
+        div.className = `flex items-center justify-between px-3 py-1.5 rounded ${isCurrent ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'}`;
+        const ws = isCurrent ? totalWsCurrent.toFixed(1) + ' W\'s' : '—';
+        const status = isCurrent
+          ? (totalWsCurrent >= avgTarget ? '<span class="text-green-600">✓</span>' : '<span class="text-amber-600">⏳</span>')
+          : '<span class="text-gray-400">—</span>';
+        div.innerHTML = `
+          <span class="text-xs ${isCurrent ? 'font-semibold text-blue-800' : 'text-gray-600'}">
+            PP${i+1}: ${fmtD(pp.start)} – ${fmtD(pp.end)} ${isCurrent ? '(current)' : ''}
+          </span>
+          <span class="text-xs font-mono ${isCurrent ? 'font-semibold' : ''}">${ws} ${status}</span>
+        `;
+        ppList.appendChild(div);
+      }
+
+      // Future cycles
+      renderFutureCycles(currentCycle);
+    }
+  }
+
+  // Overall badge
+  const allMet = ppMinMet;
+  $('hourReqBadge').textContent = allMet ? 'On Track' : 'Below Minimum';
+  $('hourReqBadge').className = `text-xs font-medium px-2 py-0.5 rounded-full ${allMet ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`;
+}
+
+function renderFutureCycles(currentCycle) {
+  const cfg = getScheduleConfig($('scheduleTypeInput').value);
+  const cycles = getAveragingCycles();
+  const fmtD = d => `${d.getMonth()+1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`;
+  const futureList = $('futureCyclesList');
+  futureList.innerHTML = '';
+
+  let count = 0;
+  for (const c of cycles) {
+    if (c.start > currentCycle.end && count < 6) {
+      const div = document.createElement('div');
+      div.className = 'flex items-center justify-between px-3 py-1.5 bg-gray-50 rounded';
+      const pps = getPayPeriodsInCycle(c);
+      div.innerHTML = `
+        <span>${fmtD(c.start)} – ${fmtD(c.end)}</span>
+        <span class="text-gray-400">${pps.length} pay periods · target ${cfg.targetWsPerPP * pps.length} total W's</span>
+      `;
+      futureList.appendChild(div);
+      count++;
+    }
+  }
+
+  $('futureCyclesSection').classList.toggle('hidden', count === 0);
+}
+
+// ===== ICS-BASED AVERAGING CYCLE ANALYSIS =====
+function checkAveragingCyclesFromIcs() {
+  const schedType = $('scheduleTypeInput').value;
+  if (schedType === 'perDiem') {
+    $('icsCycleSection').classList.add('hidden');
+    return;
+  }
+
+  if (scheduledShifts.length === 0) {
+    $('icsCycleSection').classList.add('hidden');
+    return;
+  }
+
+  const cfg = getScheduleConfig(schedType);
+  const nonClinicalPatterns = /\b(education|ed leave|vacation|sick|pto|admin|meeting|conference|cme|off|block|holiday)\b/i;
+
+  // Get clinical shifts from ICS
+  const clinicalIcsShifts = scheduledShifts.filter(ev => {
+    if (!ev.summary || !ev.dtstart) return false;
+    if (nonClinicalPatterns.test(ev.summary)) return false;
+    // Must have meaningful duration (>2 hours to filter out all-day non-work events)
+    if (ev.durationHours && ev.durationHours < 2) return false;
+    return true;
+  });
+
+  if (clinicalIcsShifts.length === 0) {
+    $('icsCycleSection').classList.add('hidden');
+    return;
+  }
+
+  // Find date range of ICS data
+  const icsDates = clinicalIcsShifts.map(ev => new Date(ev.dtstart));
+  const icsMinDate = new Date(Math.min(...icsDates));
+  const icsMaxDate = new Date(Math.max(...icsDates));
+
+  // Get all averaging cycles that overlap with ICS data
+  const allCycles = getAveragingCycles();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Find current cycle and next cycle
+  const relevantCycles = allCycles.filter(c => {
+    // Include current cycle and upcoming cycles that overlap with ICS data
+    return c.end >= today && c.start <= icsMaxDate;
+  }).slice(0, 3); // current + next 2
+
+  if (relevantCycles.length === 0) {
+    $('icsCycleSection').classList.add('hidden');
+    return;
+  }
+
+  // For each cycle, calculate W's per pay period from ICS
+  const fmtD = d => `${d.getMonth()+1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`;
+  const fmtDShort = d => `${d.getMonth()+1}/${d.getDate()}`;
+  const cardsEl = $('icsCycleCards');
+  cardsEl.innerHTML = '';
+
+  let allCyclesMet = true;
+
+  for (const cycle of relevantCycles) {
+    const payPeriods = getPayPeriodsInCycle(cycle);
+    const totalPPs = payPeriods.length;
+    const targetTotalWs = cfg.targetWsPerPP * totalPPs;
+    let cycleTotalWs = 0;
+    let cycleHasData = false;
+    let ppResults = [];
+
+    for (let i = 0; i < payPeriods.length; i++) {
+      const pp = payPeriods[i];
+      const ppStartTime = pp.start.getTime();
+      const ppEndTime = pp.end.getTime() + 24 * 60 * 60 * 1000 - 1; // end of day
+
+      // Count clinical shift hours in this pay period from ICS
+      let ppHours = 0;
+      let ppShiftCount = 0;
+      const ppShiftNames = [];
+
+      for (const ev of clinicalIcsShifts) {
+        const evDate = new Date(ev.dtstart);
+        evDate.setHours(0, 0, 0, 0);
+        if (evDate.getTime() >= ppStartTime && evDate.getTime() <= ppEndTime) {
+          // Estimate hours: use duration if available, otherwise default to 10h
+          const shiftHours = ev.durationHours && ev.durationHours > 0 && ev.durationHours <= 24
+            ? ev.durationHours : 10;
+          ppHours += shiftHours;
+          ppShiftCount++;
+          ppShiftNames.push(ev.summary);
+        }
+      }
+
+      const ppWs = ppHours / 4;
+      cycleTotalWs += ppWs;
+
+      const isPast = pp.end < today;
+      const isCurrent = today >= pp.start && today <= pp.end;
+      const hasCoverage = ppStartTime <= icsMaxDate.getTime();
+
+      if (ppShiftCount > 0 || hasCoverage) cycleHasData = true;
+
+      ppResults.push({
+        start: pp.start,
+        end: pp.end,
+        hours: ppHours,
+        ws: ppWs,
+        shiftCount: ppShiftCount,
+        shiftNames: ppShiftNames,
+        isPast,
+        isCurrent,
+        hasCoverage,
+        meetsMin: ppWs >= cfg.minWsPerPP,
+        meetsAvgTarget: ppWs >= cfg.targetWsPerPP
+      });
+    }
+
+    if (!cycleHasData) continue;
+
+    const cycleAvg = cycleTotalWs / totalPPs;
+    const cycleMeetsAvg = cycleAvg >= cfg.targetWsPerPP;
+    const isCycleComplete = cycle.end < today;
+    const isCycleCurrent = today >= cycle.start && today <= cycle.end;
+
+    // Check if all PPs with data meet minimum
+    const ppsBelowMin = ppResults.filter(p => p.hasCoverage && p.shiftCount > 0 && !p.meetsMin);
+    const allMinsOk = ppsBelowMin.length === 0;
+
+    if (!cycleMeetsAvg || !allMinsOk) allCyclesMet = false;
+
+    // Build card
+    const card = document.createElement('div');
+    const borderColor = cycleMeetsAvg && allMinsOk ? 'border-green-200 bg-green-50/50'
+      : !allMinsOk ? 'border-red-200 bg-red-50/50'
+      : 'border-amber-200 bg-amber-50/50';
+    card.className = `rounded-xl border-2 ${borderColor} p-4`;
+
+    // Cycle header
+    const statusIcon = cycleMeetsAvg && allMinsOk ? '✅' : !allMinsOk ? '🔴' : '⚠️';
+    const cycleLabel = isCycleCurrent ? 'Current Cycle' : isCycleComplete ? 'Past Cycle' : 'Upcoming Cycle';
+    const statusText = cycleMeetsAvg && allMinsOk
+      ? 'On Track'
+      : !allMinsOk
+        ? `${ppsBelowMin.length} PP(s) below minimum`
+        : 'Below avg target';
+
+    let cardHtml = `
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-lg">${statusIcon}</span>
+            <span class="font-semibold text-gray-900">${cycleLabel}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full ${cycleMeetsAvg && allMinsOk ? 'bg-green-100 text-green-800' : !allMinsOk ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}">${statusText}</span>
+          </div>
+          <p class="text-xs text-gray-500 mt-0.5">${fmtD(cycle.start)} – ${fmtD(cycle.end)}</p>
+        </div>
+        <div class="text-right">
+          <div class="text-lg font-bold ${cycleMeetsAvg ? 'text-green-700' : 'text-amber-700'}">${cycleAvg.toFixed(1)} W's/PP</div>
+          <div class="text-xs text-gray-400">avg (target: ${cfg.targetWsPerPP})</div>
+        </div>
+      </div>
+    `;
+
+    // Progress bar for cycle average
+    const avgPct = Math.min(100, (cycleAvg / cfg.targetWsPerPP) * 100);
+    const barColor = cycleMeetsAvg ? 'bg-green-500' : cycleAvg >= 15 ? 'bg-yellow-500' : 'bg-red-500';
+    cardHtml += `
+      <div class="w-full bg-gray-200 rounded-full h-2.5 mb-3">
+        <div class="${barColor} h-2.5 rounded-full transition-all" style="width: ${avgPct}%"></div>
+      </div>
+    `;
+
+    // Total line
+    cardHtml += `
+      <div class="flex justify-between text-xs text-gray-600 mb-2 px-1">
+        <span>Total: ${cycleTotalWs.toFixed(1)} W's / ${targetTotalWs} target</span>
+        <span>${(targetTotalWs - cycleTotalWs) > 0 ? (targetTotalWs - cycleTotalWs).toFixed(1) + ' W\'s remaining' : 'Target met!'}</span>
+      </div>
+    `;
+
+    // Pay period rows
+    cardHtml += '<div class="space-y-1">';
+    for (let i = 0; i < ppResults.length; i++) {
+      const pp = ppResults[i];
+      let rowBg, rowText, statusChip;
+
+      if (!pp.hasCoverage || (pp.shiftCount === 0 && !pp.isPast && !pp.isCurrent)) {
+        rowBg = 'bg-gray-100/50';
+        rowText = 'text-gray-400';
+        statusChip = '<span class="text-xs text-gray-400">No ICS data</span>';
+      } else if (!pp.meetsMin && pp.shiftCount > 0) {
+        rowBg = 'bg-red-100/60';
+        rowText = 'text-red-800';
+        statusChip = `<span class="text-xs font-semibold text-red-700">⚠ ${(cfg.minWsPerPP - pp.ws).toFixed(1)} W's short of min</span>`;
+      } else if (pp.shiftCount > 0 && !pp.meetsAvgTarget) {
+        rowBg = 'bg-amber-100/60';
+        rowText = 'text-amber-800';
+        statusChip = `<span class="text-xs text-amber-700">Below ${cfg.targetWsPerPP} W avg pace</span>`;
+      } else if (pp.shiftCount > 0) {
+        rowBg = 'bg-green-100/60';
+        rowText = 'text-green-800';
+        statusChip = '<span class="text-xs text-green-700">✓</span>';
+      } else {
+        rowBg = 'bg-gray-100/50';
+        rowText = 'text-gray-500';
+        statusChip = '<span class="text-xs text-gray-400">0 shifts</span>';
+      }
+
+      const currentTag = pp.isCurrent ? ' <span class="text-xs bg-blue-200 text-blue-800 px-1 rounded">NOW</span>' : '';
+
+      cardHtml += `
+        <div class="flex items-center justify-between px-3 py-1.5 rounded ${rowBg} ${pp.isCurrent ? 'ring-2 ring-blue-300' : ''}">
+          <span class="text-xs ${rowText}">
+            PP${i+1}: ${fmtDShort(pp.start)}–${fmtDShort(pp.end)}${currentTag}
+          </span>
+          <div class="flex items-center gap-3">
+            <span class="text-xs font-mono font-medium ${rowText}">${pp.ws.toFixed(1)} W's (${pp.shiftCount} shifts)</span>
+            ${statusChip}
+          </div>
+        </div>
+      `;
+    }
+    cardHtml += '</div>';
+
+    // If there are PPs below minimum, show actionable message
+    if (ppsBelowMin.length > 0) {
+      const ppLabels = ppsBelowMin.map(p => `${fmtDShort(p.start)}–${fmtDShort(p.end)} (${p.ws.toFixed(1)} W's, need ${cfg.minWsPerPP})`).join('; ');
+      cardHtml += `
+        <div class="mt-3 p-2 rounded-lg bg-red-100 border border-red-200 text-xs text-red-800">
+          <strong>Action needed:</strong> ${ppsBelowMin.length} pay period(s) below the ${cfg.minWsPerPP} W minimum for ${cfg.label}: ${ppLabels}. You need to pick up more shifts.
+        </div>
+      `;
+    }
+
+    if (!cycleMeetsAvg && allMinsOk) {
+      // Meets minimums but avg is low
+      const deficit = targetTotalWs - cycleTotalWs;
+      // Figure out remaining PPs that haven't passed
+      const futurePPs = ppResults.filter(p => !p.isPast && !p.isCurrent);
+      const msg = futurePPs.length > 0
+        ? `Need ${deficit.toFixed(1)} more W's across ${futurePPs.length + (ppResults.some(p => p.isCurrent) ? 1 : 0)} remaining PP(s) to hit ${cfg.targetWsPerPP} W's/PP average.`
+        : `Cycle average is ${cycleAvg.toFixed(1)} W's/PP — below the ${cfg.targetWsPerPP} W's/PP target.`;
+      cardHtml += `
+        <div class="mt-3 p-2 rounded-lg bg-amber-100 border border-amber-200 text-xs text-amber-800">
+          <strong>Heads up:</strong> ${msg}
+        </div>
+      `;
+    }
+
+    card.innerHTML = cardHtml;
+    cardsEl.appendChild(card);
+  }
+
+  // Overall badge
+  $('icsCycleSection').classList.remove('hidden');
+  $('icsCycleBadge').textContent = allCyclesMet ? 'All Cycles Met' : 'Attention Needed';
+  $('icsCycleBadge').className = `text-xs font-medium px-2 py-0.5 rounded-full ${allCyclesMet ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`;
+}
+
+// ===== UI HELPERS =====
+function showStatus(type, msg) {
+  const el = $('statusArea');
+  el.className = 'mt-4 p-3 rounded-lg text-sm ' + (type === 'success' ? 'bg-green-50 text-green-800' : 'bg-blue-50 text-blue-800');
+  el.textContent = (type === 'success' ? '✓ ' : '') + msg;
+  el.classList.remove('hidden');
+}
+function showError(msg) { $('errorArea').textContent = msg; $('errorArea').classList.remove('hidden'); }
+function hideError() { $('errorArea').classList.add('hidden'); }
+
+// ===== INIT =====
+document.addEventListener('DOMContentLoaded', () => {
+  loadSalary();
+  loadScheduleType();
+  loadExpectedShifts();
+  loadIcalUrl();
+  loadFah();
+});
+</script>
+</body>
+</html>
