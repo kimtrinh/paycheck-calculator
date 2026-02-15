@@ -1587,11 +1587,40 @@ function getScheduleConfig(type) {
   return { ...base, targetWsPerPP, minWsPerPP, maxLeaveWsPerPP, cycleTargetWs };
 }
 const AVG_CYCLE_WEEKS = 8; // 8-week cycles
-const AVG_CYCLE_DAYS = 56; // 8 weeks in days
 
-// Anchor cycle: 12/08/25 to 02/01/26
-const ANCHOR_CYCLE_START = new Date(2025, 11, 8); // Dec 8, 2025
-const ANCHOR_CYCLE_END = new Date(2026, 1, 1);     // Feb 1, 2026
+// Source: 8 week averaging calenday 2025.2026.xlsx (pay period ending grid, 4 PP per cycle)
+const AVERAGING_CYCLE_RANGES = [
+  { start: '2025-06-23', end: '2025-08-17' },
+  { start: '2025-08-18', end: '2025-10-12' },
+  { start: '2025-10-13', end: '2025-12-07' },
+  { start: '2025-12-08', end: '2026-02-01' },
+  { start: '2026-02-02', end: '2026-03-29' },
+  { start: '2026-03-30', end: '2026-05-24' },
+  { start: '2026-05-25', end: '2026-07-19' },
+  { start: '2026-07-20', end: '2026-09-13' },
+  { start: '2026-09-14', end: '2026-11-08' },
+  { start: '2026-11-09', end: '2027-01-03' },
+  { start: '2027-01-04', end: '2027-02-28' },
+  { start: '2027-03-01', end: '2027-04-25' },
+  { start: '2027-04-26', end: '2027-06-20' },
+  { start: '2027-06-21', end: '2027-08-15' },
+  { start: '2027-08-16', end: '2027-10-10' },
+  { start: '2027-10-11', end: '2027-12-05' },
+  { start: '2027-12-06', end: '2028-01-30' },
+  { start: '2028-01-31', end: '2028-03-26' },
+  { start: '2028-03-27', end: '2028-05-21' },
+  { start: '2028-05-22', end: '2028-07-16' },
+  { start: '2028-07-17', end: '2028-09-10' },
+  { start: '2028-09-11', end: '2028-11-05' },
+  { start: '2028-11-06', end: '2028-12-31' },
+  { start: '2029-01-01', end: '2029-02-25' },
+  { start: '2029-02-26', end: '2029-04-22' }
+];
+
+function parseLocalIsoDate(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
 
 function saveScheduleType() {
   try { localStorage.setItem('eptr_schedule_type', $('scheduleTypeInput').value); } catch(e) {}
@@ -1631,24 +1660,20 @@ function loadFah() {
   } catch(e) {}
 }
 
-// Calculate all averaging cycles from anchor
+// Calculate all averaging cycles from the supplied calendar
 function getAveragingCycles(fromDate, toDate) {
-  const cycles = [];
-  // Go backward from anchor to find earliest relevant cycle
-  let cycleStart = new Date(ANCHOR_CYCLE_START);
-
-  // Go backward enough to cover any date range
-  while (cycleStart > new Date(2024, 0, 1)) {
-    cycleStart = new Date(cycleStart.getTime() - AVG_CYCLE_DAYS * 24 * 60 * 60 * 1000);
-  }
-
-  // Now go forward generating cycles
-  while (cycleStart < new Date(2028, 0, 1)) {
-    const cycleEnd = new Date(cycleStart.getTime() + (AVG_CYCLE_DAYS - 1) * 24 * 60 * 60 * 1000);
-    cycles.push({ start: new Date(cycleStart), end: new Date(cycleEnd) });
-    cycleStart = new Date(cycleEnd.getTime() + 24 * 60 * 60 * 1000); // next day
-  }
-
+  let cycles = AVERAGING_CYCLE_RANGES.map(c => ({
+    start: parseLocalIsoDate(c.start),
+    end: parseLocalIsoDate(c.end)
+  }));
+  if (!fromDate && !toDate) return cycles;
+  const from = fromDate ? new Date(fromDate) : null;
+  const to = toDate ? new Date(toDate) : null;
+  cycles = cycles.filter(c => {
+    if (from && c.end < from) return false;
+    if (to && c.start > to) return false;
+    return true;
+  });
   return cycles;
 }
 
